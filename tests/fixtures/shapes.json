@@ -1,0 +1,2025 @@
+{
+ "access_control?form=black_devices": {
+  "op": "load",
+  "shape": [
+   {
+    "access_time": "int",
+    "conn_type": "<str>",
+    "guest": "<str>",
+    "host": "<str>",
+    "ipaddr": "<str>",
+    "mac": "<str>",
+    "name": "<str>",
+    "raw_conn_type": "<str>",
+    "type": "<str>"
+   }
+  ]
+ },
+ "access_control?form=black_list": {
+  "op": "load",
+  "shape": [
+   {
+    ".anonymous": "bool",
+    ".name": "<str>",
+    ".type": "<str>",
+    "deviceType": "<str>",
+    "host": "<str>",
+    "mac": "<str>",
+    "name": "<str>"
+   }
+  ]
+ },
+ "access_control?form=enable": {
+  "op": "read",
+  "shape": {
+   "enable": "off",
+   "host_mac": "<str>"
+  }
+ },
+ "access_control?form=mode": {
+  "op": "read",
+  "shape": {
+   "access_mode": "<str>"
+  }
+ },
+ "access_control?form=white_devices": {
+  "op": "load",
+  "shape": [
+   {
+    "access_time": "int",
+    "conn_type": "<str>",
+    "guest": "<str>",
+    "host": "<str>",
+    "ipaddr": "<str>",
+    "mac": "<str>",
+    "name": "<str>",
+    "raw_conn_type": "<str>",
+    "type": "<str>"
+   }
+  ]
+ },
+ "access_control?form=white_list": {
+  "op": "load",
+  "shape": [
+   {
+    ".anonymous": "bool",
+    ".name": "<str>",
+    ".type": "<str>",
+    "deviceType": "<str>",
+    "host": "<str>",
+    "mac": "<str>",
+    "name": "<str>"
+   }
+  ]
+ },
+ "administration?form=account": {
+  "op": "read",
+  "shape": {
+   "cfm_pwd": [
+    "<str>"
+   ],
+   "new_acc": "<str>",
+   "new_pwd": [
+    "<str>"
+   ],
+   "old_acc": "<str>",
+   "old_pwd": [
+    "<str>"
+   ]
+  }
+ },
+ "administration?form=agileconfig": {
+  "error": "no such callback"
+ },
+ "administration?form=https": {
+  "op": "read",
+  "shape": {
+   "https_enable": "on"
+  }
+ },
+ "administration?form=local": {
+  "op": "load",
+  "shape": {}
+ },
+ "administration?form=mode": {
+  "op": "read",
+  "shape": {
+   "mode": "<str>"
+  }
+ },
+ "administration?form=remote": {
+  "op": "read",
+  "shape": {
+   "enable": "off",
+   "enable_superadmin": "off",
+   "http_port": "<str>",
+   "https_port": "<str>",
+   "managers": "<str>",
+   "remote": "bool",
+   "web_address": "<str>"
+  }
+ },
+ "administration?form=superadminconfig": {
+  "op": "read",
+  "shape": {
+   "disable": "off"
+  }
+ },
+ "administration?form=usersetting": {
+  "op": "read",
+  "shape": {
+   "additionalsettings_editable": "on",
+   "additionalsettings_visible": "on",
+   "alg_editable": "on",
+   "alg_visible": "on",
+   "backuprestore_editable": "on",
+   "backuprestore_visible": "on",
+   "cwmp_editable": "on",
+   "cwmp_visible": "on",
+   "dmz_editable": "on",
+   "dmz_visible": "on",
+   "firewall_editable": "on",
+   "firewall_visible": "on",
+   "firmware_editable": "on",
+   "firmware_visible": "on",
+   "internetadv_editable": "on",
+   "internetadv_visible": "on",
+   "iptvadv_editable": "on",
+   "iptvadv_visible": "on",
+   "ipv6_editable": "on",
+   "ipv6_visible": "on",
+   "quicksetup_editable": "on",
+   "quicksetup_visible": "on",
+   "remotemanagement_editable": "on",
+   "remotemanagement_visible": "on",
+   "upnp_editable": "on",
+   "upnp_visible": "on"
+  }
+ },
+ "avira_network_check?form=avira_network_scan": {
+  "error": "no such callback"
+ },
+ "avira_parental_control?form=avira_pactrl": {
+  "error": "no such callback"
+ },
+ "ddns?form=dyndns": {
+  "op": "read",
+  "shape": {
+   "domain": "<str>",
+   "logined": "int",
+   "password": "<str>",
+   "status": "int",
+   "update_time": "<str>",
+   "username": "<str>"
+  }
+ },
+ "ddns?form=noip": {
+  "op": "read",
+  "shape": {
+   "domain": "<str>",
+   "logined": "int",
+   "password": "<str>",
+   "status": "int",
+   "update_time": "<str>",
+   "username": "<str>",
+   "wan_bind": "<str>"
+  }
+ },
+ "ddns?form=provider": {
+  "op": "read",
+  "shape": {
+   "provider": "<str>"
+  }
+ },
+ "ddns?form=tplink": {
+  "op": "load",
+  "shape": [
+   {
+    "current_domain": "bool",
+    "device": "<str>",
+    "domain": "<str>",
+    "status": "<str>",
+    "time": "<str>"
+   }
+  ]
+ },
+ "dhcps?form=client": {
+  "op": "load",
+  "shape": [
+   {
+    "ipaddr": "<str>",
+    "leasetime": "<str>",
+    "macaddr": "<str>",
+    "name": "<str>"
+   }
+  ]
+ },
+ "dhcps?form=reservation": {
+  "op": "load",
+  "shape": [
+   {
+    "comment": "<str>",
+    "enable": "on",
+    "hostname": "<str>",
+    "ip": "<str>",
+    "mac": "<str>"
+   }
+  ]
+ },
+ "dhcps?form=setting": {
+  "op": "read",
+  "shape": {
+   "domain": "<str>",
+   "enable": "on",
+   "gateway": "<str>",
+   "ipaddr_end": "<str>",
+   "ipaddr_start": "<str>",
+   "leasetime": "<str>",
+   "pri_dns": "<str>",
+   "snd_dns": "<str>"
+  }
+ },
+ "disk_setting?form=metadata": {
+  "op": "read",
+  "shape": {
+   "list": {},
+   "number": "int"
+  }
+ },
+ "easymesh?form=easymesh_enable": {
+  "op": "read",
+  "shape": {
+   "enable": "off",
+   "time": "int"
+  }
+ },
+ "easymesh_network?form=ap_avoidance_enable_status": {
+  "op": "read",
+  "shape": {
+   "status": "<str>"
+  }
+ },
+ "easymesh_network?form=available_mesh_device_manage": {
+  "error": "no such callback"
+ },
+ "easymesh_network?form=get_mesh_device_list_all": {
+  "op": "read",
+  "shape": {}
+ },
+ "easymesh_network?form=get_mesh_topo": {
+  "op": "read",
+  "shape": {}
+ },
+ "easymesh_network?form=mesh_sclient_detail": {
+  "error": "no such callback"
+ },
+ "easymesh_network?form=mesh_sclient_list_all": {
+  "op": "read",
+  "shape": {}
+ },
+ "eco_mode?form=settings": {
+  "op": "read",
+  "shape": {
+   "power_mode": "<str>",
+   "time_end": "<str>",
+   "time_start": "<str>"
+  }
+ },
+ "ffs?form=config": {
+  "op": "read",
+  "shape": {
+   "enable": "on",
+   "ssid": "<str>"
+  }
+ },
+ "firmware?form=auto_upgrade": {
+  "op": "read",
+  "shape": {
+   "delay": "0",
+   "enable": "on",
+   "time": "<str>"
+  }
+ },
+ "firmware?form=config": {
+  "op": "read",
+  "shape": {
+   "totaltime": "int"
+  }
+ },
+ "firmware?form=upgrade": {
+  "op": "read",
+  "shape": {
+   "firmware_version": "<str>",
+   "hardware_version": "<str>",
+   "is_default": "bool",
+   "model": "<str>",
+   "totaltime": "int",
+   "upgraded": "bool",
+   "upgradetime": "int"
+  }
+ },
+ "folder_sharing?form=auth": {
+  "op": "read",
+  "shape": {
+   "authentication": "on"
+  }
+ },
+ "folder_sharing?form=media": {
+  "op": "read",
+  "shape": {
+   "media_sharing": "off"
+  }
+ },
+ "folder_sharing?form=mode": {
+  "op": "read",
+  "shape": {}
+ },
+ "folder_sharing?form=partial": {
+  "op": "read",
+  "shape": {}
+ },
+ "folder_sharing?form=server": {
+  "op": "read",
+  "shape": {
+   "server": "<str>"
+  }
+ },
+ "folder_sharing?form=settings": {
+  "op": "read",
+  "shape": [
+   {
+    "edit": "bool",
+    "enable": "off",
+    "key": "int",
+    "link": "<str>",
+    "port": "<str>",
+    "protocol": "<str>"
+   }
+  ]
+ },
+ "folder_sharing?form=tree": {
+  "error": null
+ },
+ "imb?form=arp_list": {
+  "op": "load",
+  "shape": [
+   {
+    "enable": "off",
+    "ipaddr": "<str>",
+    "mac": "<str>",
+    "name": "<str>"
+   }
+  ]
+ },
+ "imb?form=bind_list": {
+  "op": "load",
+  "shape": [
+   {
+    "description": "<str>",
+    "enable": "on",
+    "ipaddr": "<str>",
+    "mac": "<str>",
+    "name": "<str>"
+   }
+  ]
+ },
+ "imb?form=client_list": {
+  "op": "read",
+  "shape": [
+   {
+    "client_type": "<str>",
+    "guest": "<str>",
+    "ip": "<str>",
+    "mac": "<str>",
+    "name": "<str>",
+    "wire_type": "<str>"
+   }
+  ]
+ },
+ "imb?form=setting": {
+  "op": "read",
+  "shape": {
+   "enable": "on"
+  }
+ },
+ "iot_security?form=enable": {
+  "op": "read",
+  "shape": {
+   "enable": "bool"
+  }
+ },
+ "iot_security?form=isolated_devices_iot": {
+  "op": "load",
+  "shape": {
+   "iot_device": [
+    {
+     "device_type": "<str>",
+     "mac": "<str>",
+     "name": "<str>"
+    }
+   ],
+   "iot_network_status": "bool"
+  }
+ },
+ "iot_security?form=isolated_devices_main": {
+  "op": "load",
+  "shape": [
+   {
+    "device_type": "<str>",
+    "mac": "<str>",
+    "name": "<str>"
+   }
+  ]
+ },
+ "iot_security?form=isolated_list": {
+  "op": "load",
+  "shape": {}
+ },
+ "iptv?form=setting": {
+  "op": "read",
+  "shape": {
+   "cfg_changed": "bool",
+   "configure": "on",
+   "enable": "off",
+   "igmp_enable": "on",
+   "igmp_snooping_enable": "on",
+   "igmp_version": "<str>",
+   "internet_item": "off",
+   "internet_tag": "off",
+   "internet_vid": "0",
+   "internet_vprio": "0",
+   "ipphone_enable": "on",
+   "ipphone_item": "off",
+   "ipphone_tag": "on",
+   "ipphone_vid": "0",
+   "ipphone_vprio": "0",
+   "iptv_allow_lan_configure": "bool",
+   "iptv_allow_lan_no_internet": "bool",
+   "iptv_enable": "on",
+   "iptv_item": "off",
+   "iptv_tag": "on",
+   "iptv_vid": "0",
+   "iptv_vprio": "0",
+   "mciptv_enable": "off",
+   "mciptv_item": "off",
+   "mciptv_vid": "0",
+   "mciptv_vprio": "0",
+   "mcwifi_enable": "on",
+   "mode": "<str>",
+   "port_settings": [
+    {
+     "name": "<str>",
+     "type": "<str>"
+    }
+   ],
+   "qos_iptv_compatible": "no",
+   "seltype": [
+    "<str>"
+   ],
+   "support_mode_list": [
+    "<str>"
+   ],
+   "wait_time": "<str>"
+  }
+ },
+ "iptv?form=udp_proxy_setting": {
+  "op": "read",
+  "shape": {
+   "udp_proxy": "<str>",
+   "udp_proxy_enable": "off"
+  }
+ },
+ "l2tpoveripsec?form=accounts": {
+  "op": "load",
+  "shape": {}
+ },
+ "l2tpoveripsec?form=config": {
+  "op": "read",
+  "shape": {
+   "access": "<str>",
+   "enabled": "off",
+   "encrypt": "on",
+   "maxconn": "<str>",
+   "netbios_pass": "off",
+   "netmask": "<str>",
+   "remoteip": "<str>",
+   "samba_access": "off",
+   "serverip": "<str>",
+   "subnet": "<str>"
+  }
+ },
+ "ledgeneral?form=setting": {
+  "op": "read",
+  "shape": {
+   "enable": "on",
+   "ledst_support": "yes"
+  }
+ },
+ "ledpm?form=setting": {
+  "op": "read",
+  "shape": {
+   "enable": "off",
+   "ledpm_support": "yes",
+   "time_end": "<str>",
+   "time_start": "<str>"
+  }
+ },
+ "nat?form=alg": {
+  "op": "read",
+  "shape": {
+   "ftp": "on",
+   "h323": "on",
+   "ipsec": "on",
+   "l2tp": "on",
+   "pptp": "on",
+   "rtsp": "on",
+   "sip": "on",
+   "tftp": "on"
+  }
+ },
+ "nat?form=client_list": {
+  "op": "read",
+  "shape": [
+   {
+    "client_type": "<str>",
+    "guest": "<str>",
+    "ip": "<str>",
+    "mac": "<str>",
+    "name": "<str>",
+    "wire_type": "<str>"
+   }
+  ]
+ },
+ "nat?form=client_list_v6": {
+  "op": "read",
+  "shape": {}
+ },
+ "nat?form=dmz": {
+  "op": "read",
+  "shape": {
+   "enable": "off",
+   "ipaddr": "<str>"
+  }
+ },
+ "nat?form=fr6": {
+  "op": "read",
+  "shape": {}
+ },
+ "nat?form=pt": {
+  "op": "read",
+  "shape": {}
+ },
+ "nat?form=setting": {
+  "op": "read",
+  "shape": {
+   "boost_enable": "on",
+   "boost_qos_compatible": "no",
+   "boost_support": "yes",
+   "boost_traffic_compatible": "yes",
+   "enable": "on",
+   "reboot_time": "int"
+  }
+ },
+ "nat?form=vs": {
+  "op": "read",
+  "shape": [
+   {
+    "enable": "on",
+    "external_port": "<str>",
+    "internal_port": "<str>",
+    "ipaddr": "<str>",
+    "name": "<str>",
+    "protocol": "<str>"
+   }
+  ]
+ },
+ "network?form=lan_agg": {
+  "op": "read",
+  "shape": {
+   "enable_agg": "0",
+   "hashmode": "0",
+   "lacpmode": "0",
+   "port_settings": [
+    {
+     "enable": "bool",
+     "name": "<str>"
+    }
+   ]
+  }
+ },
+ "network?form=lan_fc": {
+  "op": "read",
+  "shape": {
+   "rx_enable": "bool",
+   "tx_enable": "bool"
+  }
+ },
+ "network?form=lan_ipv4": {
+  "op": "read",
+  "shape": {
+   "custom_value": "<str>",
+   "ipaddr": "<str>",
+   "lan_type": "<str>",
+   "macaddr": "<str>",
+   "mask_type": "<str>",
+   "pri_dns": "<str>",
+   "snd_dns": "<str>"
+  }
+ },
+ "network?form=lan_ipv6": {
+  "op": "read",
+  "shape": {
+   "address": "<str>",
+   "assign_type": "<str>",
+   "dhcp_prefix": "<str>",
+   "ndp_prefix": "<str>",
+   "rdnss_prefix": "<str>",
+   "release_time": "<str>",
+   "slaac_prefix": "<str>"
+  }
+ },
+ "network?form=mac_clone_advanced": {
+  "op": "read",
+  "shape": {
+   "mac_clone_support": "yes",
+   "mac_clone_type": "<str>",
+   "mac_computer": "<str>",
+   "mac_custom": "<str>",
+   "mac_default": "<str>"
+  }
+ },
+ "network?form=port_speed_current": {
+  "op": "read",
+  "shape": {
+   "speed": "<str>"
+  }
+ },
+ "network?form=port_speed_supported": {
+  "op": "read",
+  "shape": {
+   "supported": [
+    "<str>"
+   ]
+  }
+ },
+ "network?form=routes_static": {
+  "op": "load",
+  "shape": [
+   {
+    "enable": "on",
+    "gateway": "<str>",
+    "interface": "<str>",
+    "key": "<str>",
+    "name": "<str>",
+    "netmask": "<str>",
+    "target": "<str>"
+   }
+  ]
+ },
+ "network?form=routes_system": {
+  "op": "load",
+  "shape": [
+   {
+    "dest": "<str>",
+    "gateway": "<str>",
+    "interface": "<str>",
+    "mask": "<str>"
+   }
+  ]
+ },
+ "network?form=status_ipv4": {
+  "op": "read",
+  "shape": {
+   "lan_ipv4_dhcp_enable": "On",
+   "lan_ipv4_ipaddr": "<str>",
+   "lan_ipv4_netmask": "<str>",
+   "lan_macaddr": "<str>",
+   "wan_ipv4_conntype": "<str>",
+   "wan_ipv4_gateway": "<str>",
+   "wan_ipv4_ipaddr": "<str>",
+   "wan_ipv4_netmask": "<str>",
+   "wan_ipv4_pridns": "<str>",
+   "wan_ipv4_snddns": "<str>",
+   "wan_ipv4_uptime": "int",
+   "wan_macaddr": "<str>"
+  }
+ },
+ "network?form=wan_autodetect": {
+  "error": "autodetect failed"
+ },
+ "network?form=wan_detect_state": {
+  "op": "read",
+  "shape": {
+   "enable": "bool"
+  }
+ },
+ "network?form=wan_dohdot": {
+  "op": "read",
+  "shape": {
+   "dns_mode": "<str>",
+   "dns_privacy": "<str>",
+   "server_list": [
+    "<str>"
+   ]
+  }
+ },
+ "network?form=wan_fc": {
+  "op": "read",
+  "shape": {
+   "rx_enable": "bool",
+   "tx_enable": "bool"
+  }
+ },
+ "network?form=wan_ipv4_bigpond": {
+  "error": "invalid proto_name"
+ },
+ "network?form=wan_ipv4_dslite": {
+  "op": "read",
+  "shape": {
+   "AFTR_name": "<str>",
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "dynamic_mode": "1",
+   "is_support_dynamic_mode": "1",
+   "link_status": "<str>",
+   "nonaddress_support": "int",
+   "pppshare": "int"
+  }
+ },
+ "network?form=wan_ipv4_dynamic": {
+  "op": "read",
+  "shape": {
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "dns_mode": "<str>",
+   "dyn_pridns": "<str>",
+   "dyn_snddns": "<str>",
+   "gateway": "<str>",
+   "hostname": "<str>",
+   "ipaddr": "<str>",
+   "link_status": "<str>",
+   "mac_clone_type": "<str>",
+   "manual_pridns": "<str>",
+   "manual_snddns": "<str>",
+   "mtu": "<str>",
+   "netmask": "<str>",
+   "nonaddress_support": "int",
+   "pppshare": "int",
+   "pri_dns": "<str>",
+   "snd_dns": "<str>",
+   "unicast": "off"
+  }
+ },
+ "network?form=wan_ipv4_ipv6_option": {
+  "error": "no such callback"
+ },
+ "network?form=wan_ipv4_l2tp": {
+  "op": "read",
+  "shape": {
+   "conn_mode": "<str>",
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "demand_idle": "<str>",
+   "dyn_gateway": "<str>",
+   "dyn_ip": "<str>",
+   "dyn_netmask": "<str>",
+   "dyn_pridns": "<str>",
+   "dyn_server": "<str>",
+   "dyn_snddns": "<str>",
+   "inet_ip": "<str>",
+   "inet_pridns": "<str>",
+   "inet_snddns": "<str>",
+   "link_status": "<str>",
+   "manual_idle": "<str>",
+   "mtu": "<str>",
+   "nonaddress_support": "int",
+   "password": "<str>",
+   "pppshare": "int",
+   "snd_conn": "<str>",
+   "static_gateway": "<str>",
+   "static_ip": "<str>",
+   "static_netmask": "<str>",
+   "static_pridns": "<str>",
+   "static_server": "<str>",
+   "static_snddns": "<str>",
+   "username": "<str>"
+  }
+ },
+ "network?form=wan_ipv4_ocn": {
+  "op": "read",
+  "shape": {
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "link_status": "<str>",
+   "nonaddress_support": "int",
+   "pppshare": "int"
+  }
+ },
+ "network?form=wan_ipv4_pppoe": {
+  "op": "read",
+  "shape": {
+   "access": "<str>",
+   "conn_mode": "<str>",
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "demand_idle": "<str>",
+   "dns_mode": "<str>",
+   "dyn_ip": "<str>",
+   "dyn_netmask": "<str>",
+   "dyn_pridns": "<str>",
+   "dyn_snddns": "<str>",
+   "inet_ip": "<str>",
+   "inet_pridns": "<str>",
+   "inet_snddns": "<str>",
+   "interval": "<str>",
+   "ip_mode": "<str>",
+   "link_status": "<str>",
+   "manual_idle": "<str>",
+   "mtu": "<str>",
+   "nonaddress_support": "int",
+   "password": "<str>",
+   "pppshare": "int",
+   "server": "<str>",
+   "snd_conn": "<str>",
+   "specific_ip": "<str>",
+   "static_ip": "<str>",
+   "static_netmask": "<str>",
+   "static_pridns": "<str>",
+   "static_snddns": "<str>",
+   "time_end": "<str>",
+   "time_start": "<str>",
+   "username": "<str>"
+  }
+ },
+ "network?form=wan_ipv4_pptp": {
+  "op": "read",
+  "shape": {
+   "conn_mode": "<str>",
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "demand_idle": "<str>",
+   "dyn_gateway": "<str>",
+   "dyn_ip": "<str>",
+   "dyn_netmask": "<str>",
+   "dyn_pridns": "<str>",
+   "dyn_server": "<str>",
+   "dyn_snddns": "<str>",
+   "inet_ip": "<str>",
+   "inet_pridns": "<str>",
+   "inet_snddns": "<str>",
+   "link_status": "<str>",
+   "manual_idle": "<str>",
+   "mtu": "<str>",
+   "nonaddress_support": "int",
+   "password": "<str>",
+   "pppshare": "int",
+   "snd_conn": "<str>",
+   "static_gateway": "<str>",
+   "static_ip": "<str>",
+   "static_netmask": "<str>",
+   "static_pridns": "<str>",
+   "static_server": "<str>",
+   "static_snddns": "<str>",
+   "username": "<str>"
+  }
+ },
+ "network?form=wan_ipv4_protos": {
+  "op": "read",
+  "shape": [
+   {
+    "name": "<str>",
+    "value": "<str>"
+   }
+  ]
+ },
+ "network?form=wan_ipv4_staticip": {
+  "op": "read",
+  "shape": {
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "gateway": "<str>",
+   "ipaddr": "<str>",
+   "link_status": "<str>",
+   "mtu": "<str>",
+   "netmask": "<str>",
+   "nonaddress_support": "int",
+   "pppshare": "int",
+   "pri_dns": "<str>",
+   "snd_dns": "<str>"
+  }
+ },
+ "network?form=wan_ipv4_status": {
+  "op": "read",
+  "shape": {
+   "autodetect": "on",
+   "conntype": "<str>"
+  }
+ },
+ "network?form=wan_ipv4_v6plus": {
+  "op": "read",
+  "shape": {
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "link_status": "<str>",
+   "nonaddress_support": "int",
+   "pppshare": "int"
+  }
+ },
+ "network?form=wan_ipv6_dynamic": {
+  "op": "read",
+  "shape": {
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "dns_mode": "<str>",
+   "dyn_pridns": "<str>",
+   "dyn_snddns": "<str>",
+   "ip6addr": "<str>",
+   "ip_config": "<str>",
+   "ip_mode": "<str>",
+   "link_status": "<str>",
+   "nonaddress_support": "int",
+   "pppshare": "int",
+   "prefix": "<str>",
+   "pri_dns": "<str>",
+   "snd_dns": "<str>",
+   "static_pridns": "<str>",
+   "static_snddns": "<str>"
+  }
+ },
+ "network?form=wan_ipv6_pass": {
+  "op": "read",
+  "shape": {
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "link_status": "<str>",
+   "nonaddress_support": "int",
+   "pppshare": "int",
+   "type": "<str>"
+  }
+ },
+ "network?form=wan_ipv6_pppoe": {
+  "op": "read",
+  "shape": {
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "dns_mode": "<str>",
+   "dyn_pridns": "<str>",
+   "dyn_snddns": "<str>",
+   "ip6addr": "<str>",
+   "ip_config": "<str>",
+   "ip_mode": "<str>",
+   "link_status": "<str>",
+   "nonaddress_support": "int",
+   "password": "<str>",
+   "pppshare": "int",
+   "specific_ip": "<str>",
+   "static_pridns": "<str>",
+   "static_snddns": "<str>",
+   "username": "<str>"
+  }
+ },
+ "network?form=wan_ipv6_protos": {
+  "op": "read",
+  "shape": [
+   {
+    "name": "<str>",
+    "value": "<str>"
+   }
+  ]
+ },
+ "network?form=wan_ipv6_static": {
+  "op": "read",
+  "shape": {
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "ip6addr": "<str>",
+   "ip6gw": "<str>",
+   "link_status": "<str>",
+   "mtu": "<str>",
+   "nonaddress_support": "int",
+   "pppshare": "int",
+   "pri_dns": "<str>",
+   "snd_dns": "<str>"
+  }
+ },
+ "network?form=wan_ipv6_status": {
+  "op": "read",
+  "shape": {
+   "conntype": "<str>",
+   "enable": "off"
+  }
+ },
+ "network?form=wan_ipv6_tunnel": {
+  "op": "read",
+  "shape": {
+   "conn_status": "<str>",
+   "conntype": "<str>",
+   "dns_mode": "<str>",
+   "gateway": "<str>",
+   "ipaddr": "<str>",
+   "link_status": "<str>",
+   "netmask": "<str>",
+   "nonaddress_support": "int",
+   "pppshare": "int",
+   "pri_dns": "<str>",
+   "snd_dns": "<str>",
+   "tunnel_addr": "<str>"
+  }
+ },
+ "network?form=wan_port_status": {
+  "op": "read",
+  "shape": {
+   "wan_port_status": "<str>"
+  }
+ },
+ "network?form=wan_retrieve_ipv4_pppoe": {
+  "op": "read",
+  "shape": {
+   "status": "bool"
+  }
+ },
+ "openvpn?form=config": {
+  "op": "read",
+  "shape": {
+   "access": "<str>",
+   "cert_exist": "bool",
+   "enabled": "on",
+   "interface_type": "<str>",
+   "mask": "<str>",
+   "port": "<str>",
+   "proto": "<str>",
+   "serverip": "<str>"
+  }
+ },
+ "openvpn?form=openvpn_cert": {
+  "error": "no such callback"
+ },
+ "pptpd?form=accounts": {
+  "op": "load",
+  "shape": {}
+ },
+ "pptpd?form=config": {
+  "op": "read",
+  "shape": {
+   "enabled": "off",
+   "netbios_pass": "on",
+   "remoteip": "<str>",
+   "samba_access": "on",
+   "unencrypted_access": "on"
+  }
+ },
+ "privacy_policy?form=fing_auth_state": {
+  "op": "read",
+  "shape": {
+   "enable": "bool",
+   "is_first": "bool"
+  }
+ },
+ "reboot?form=set": {
+  "op": "read",
+  "shape": {
+   "cycle": "<str>",
+   "day": "<str>",
+   "enable": "off",
+   "time": "<str>"
+  }
+ },
+ "security_settings?form=new_enable": {
+  "op": "read",
+  "shape": {
+   "enable": "on",
+   "lan_ping": "on",
+   "wan_ping": "off"
+  }
+ },
+ "smart_network?form=device_priority": {
+  "op": "load",
+  "shape": [
+   {
+    "deviceName": "<str>",
+    "deviceTag": "<str>",
+    "deviceType": "<str>",
+    "downloadSpeed": "int",
+    "enableLimit": "off",
+    "enablePriority": "bool",
+    "index": "int",
+    "key": "<str>",
+    "mac": "<str>",
+    "remainTime": "int",
+    "timePeriod": "<str>",
+    "trafficUsage": "int",
+    "uploadSpeed": "int"
+   }
+  ]
+ },
+ "smart_network?form=game_accelerator": {
+  "error": "no such callback"
+ },
+ "smart_network?form=get_host_info": {
+  "op": "read",
+  "shape": {
+   "host_mac": "<str>",
+   "wire_type": "<str>"
+  }
+ },
+ "smart_network?form=qos": {
+  "op": "read",
+  "shape": {
+   "down_band": "<str>",
+   "down_unit": "<str>",
+   "enable": "off",
+   "enable_app": "on",
+   "enable_phy": "on",
+   "high": "<str>",
+   "low": "<str>",
+   "max_down_band": "int",
+   "max_up_band": "int",
+   "max_wan_speed": "int",
+   "middle": "<str>",
+   "qos_iptv_compatible": "no",
+   "time": "<str>",
+   "up_band": "<str>",
+   "up_unit": "<str>"
+  }
+ },
+ "status?form=all": {
+  "op": "read",
+  "shape": {
+   "access_devices_wired": [
+    {
+     "hostname": "<str>",
+     "ipaddr": "<str>",
+     "macaddr": "<str>",
+     "wire_type": "<str>"
+    }
+   ],
+   "access_devices_wireless_host": [
+    {
+     "hostname": "<str>",
+     "ipaddr": "<str>",
+     "macaddr": "<str>",
+     "wire_type": "<str>"
+    }
+   ],
+   "conn_type": "0",
+   "cpu1_usage": "float",
+   "cpu2_usage": "float",
+   "cpu3_usage": "float",
+   "cpu4_usage": "float",
+   "cpu_usage": "float",
+   "guest_2g5g_authentication_timeout": "<str>",
+   "guest_2g5g_authentication_type": "<str>",
+   "guest_2g5g_encryption": "<str>",
+   "guest_2g5g_passwd_cycle": "<str>",
+   "guest_2g5g_portal_password": "<str>",
+   "guest_2g5g_psk_cipher": "<str>",
+   "guest_2g5g_psk_key": "<str>",
+   "guest_2g5g_psk_version": "<str>",
+   "guest_2g5g_redirect": "off",
+   "guest_2g5g_redirect_url": "<str>",
+   "guest_2g_authentication_timeout": "<str>",
+   "guest_2g_authentication_type": "<str>",
+   "guest_2g_disabled": "off",
+   "guest_2g_disabled_by": "<str>",
+   "guest_2g_enable": "on",
+   "guest_2g_encryption": "<str>",
+   "guest_2g_extinfo": {
+    "support_band": "<str>",
+    "support_guest_dynpasswd": "no",
+    "wds_guest_compatible": "no"
+   },
+   "guest_2g_hidden": "off",
+   "guest_2g_portal_password": "<str>",
+   "guest_2g_psk_cipher": "<str>",
+   "guest_2g_psk_key": "<str>",
+   "guest_2g_psk_version": "<str>",
+   "guest_2g_redirect": "off",
+   "guest_2g_redirect_url": "<str>",
+   "guest_2g_ssid": "<str>",
+   "guest_5g_authentication_timeout": "<str>",
+   "guest_5g_authentication_type": "<str>",
+   "guest_5g_disabled": "off",
+   "guest_5g_disabled_by": "<str>",
+   "guest_5g_enable": "on",
+   "guest_5g_encryption": "<str>",
+   "guest_5g_extinfo": {
+    "support_band": "<str>",
+    "support_guest_dynpasswd": "no",
+    "wds_guest_compatible": "no"
+   },
+   "guest_5g_hidden": "off",
+   "guest_5g_portal_password": "<str>",
+   "guest_5g_psk_cipher": "<str>",
+   "guest_5g_psk_key": "<str>",
+   "guest_5g_psk_version": "<str>",
+   "guest_5g_redirect": "off",
+   "guest_5g_redirect_url": "<str>",
+   "guest_5g_ssid": "<str>",
+   "guest_6g_authentication_timeout": "<str>",
+   "guest_6g_authentication_type": "<str>",
+   "guest_6g_disabled": "off",
+   "guest_6g_disabled_by": "<str>",
+   "guest_6g_enable": "on",
+   "guest_6g_encryption": "<str>",
+   "guest_6g_extinfo": {
+    "support_band": "<str>",
+    "support_guest_dynpasswd": "no",
+    "wds_guest_compatible": "no"
+   },
+   "guest_6g_hidden": "off",
+   "guest_6g_portal_password": "<str>",
+   "guest_6g_psk_cipher": "<str>",
+   "guest_6g_psk_key": "<str>",
+   "guest_6g_psk_version": "<str>",
+   "guest_6g_redirect": "off",
+   "guest_6g_redirect_url": "<str>",
+   "guest_6g_ssid": "<str>",
+   "guest_access": "on",
+   "guest_isolate": "on",
+   "iot_2g_disabled": "off",
+   "iot_2g_disabled_by": "<str>",
+   "iot_2g_enable": "on",
+   "iot_2g_encryption": "<str>",
+   "iot_2g_hidden": "off",
+   "iot_2g_psk_cipher": "<str>",
+   "iot_2g_psk_key": "<str>",
+   "iot_2g_psk_version": "<str>",
+   "iot_2g_ssid": "<str>",
+   "iot_5g_disabled": "off",
+   "iot_5g_disabled_by": "<str>",
+   "iot_5g_enable": "on",
+   "iot_5g_encryption": "<str>",
+   "iot_5g_hidden": "off",
+   "iot_5g_psk_cipher": "<str>",
+   "iot_5g_psk_key": "<str>",
+   "iot_5g_psk_version": "<str>",
+   "iot_5g_ssid": "<str>",
+   "lan_ipv4_dhcp_enable": "On",
+   "lan_ipv4_ipaddr": "<str>",
+   "lan_ipv4_netmask": "<str>",
+   "lan_ipv6_assign_type": "<str>",
+   "lan_ipv6_ipaddr": "<str>",
+   "lan_ipv6_link_local_addr": "<str>",
+   "lan_macaddr": "<str>",
+   "mem_usage": "float",
+   "mlo_host_2g_band_select": "off",
+   "mlo_host_2g_enable": "off",
+   "mlo_host_2g_encryption": "<str>",
+   "mlo_host_2g_hidden": "off",
+   "mlo_host_2g_psk_key": "<str>",
+   "mlo_host_2g_psk_version": "<str>",
+   "mlo_host_2g_ssid": "<str>",
+   "mlo_host_2g_support": "off",
+   "mlo_host_5g_band_select": "on",
+   "mlo_host_5g_enable": "on",
+   "mlo_host_5g_encryption": "<str>",
+   "mlo_host_5g_hidden": "off",
+   "mlo_host_5g_psk_key": "<str>",
+   "mlo_host_5g_psk_version": "<str>",
+   "mlo_host_5g_ssid": "<str>",
+   "mlo_host_5g_support": "on",
+   "mlo_host_6g_band_select": "on",
+   "mlo_host_6g_enable": "on",
+   "mlo_host_6g_encryption": "<str>",
+   "mlo_host_6g_hidden": "off",
+   "mlo_host_6g_psk_key": "<str>",
+   "mlo_host_6g_psk_version": "<str>",
+   "mlo_host_6g_ssid": "<str>",
+   "mlo_host_6g_support": "on",
+   "modem_available": "int",
+   "modem_connstatus": "0",
+   "modem_gateway": "<str>",
+   "modem_ipaddr": "<str>",
+   "modem_ipv4_uptime": "0",
+   "modem_netmask": "<str>",
+   "modem_pinlock": "0",
+   "modem_pridns": "<str>",
+   "modem_signal": "<str>",
+   "modem_snddns": "<str>",
+   "printer_count": "int",
+   "printer_name": "<str>",
+   "storage_available": "int",
+   "storage_available_unit": "<str>",
+   "storage_capacity": "int",
+   "storage_capacity_unit": "<str>",
+   "storage_vendor": "<str>",
+   "usb_storages": {},
+   "wan_ipv4_conntype": "<str>",
+   "wan_ipv4_gateway": "<str>",
+   "wan_ipv4_ipaddr": "<str>",
+   "wan_ipv4_netmask": "<str>",
+   "wan_ipv4_pridns": "<str>",
+   "wan_ipv4_snddns": "<str>",
+   "wan_ipv4_uptime": "int",
+   "wan_ipv6_conntype": "<str>",
+   "wan_ipv6_enable": "off",
+   "wan_ipv6_gateway": "<str>",
+   "wan_ipv6_ip6addr": "<str>",
+   "wan_ipv6_pridns": "<str>",
+   "wan_ipv6_snddns": "<str>",
+   "wan_macaddr": "<str>",
+   "wireless_2g_airtime_fairness": "off",
+   "wireless_2g_channel": "<str>",
+   "wireless_2g_current_channel": "<str>",
+   "wireless_2g_disabled": "off",
+   "wireless_2g_disabled_all": "off",
+   "wireless_2g_disabled_by": "<str>",
+   "wireless_2g_enable": "on",
+   "wireless_2g_enable_portal_multissid": "off",
+   "wireless_2g_encryption": "<str>",
+   "wireless_2g_extinfo": {
+    "support_band": "<str>",
+    "support_guest_dynpasswd": "no",
+    "wds_guest_compatible": "no"
+   },
+   "wireless_2g_hidden": "off",
+   "wireless_2g_htmode": "<str>",
+   "wireless_2g_hwmode": "<str>",
+   "wireless_2g_macaddr": "<str>",
+   "wireless_2g_mu_mimo": "on",
+   "wireless_2g_port": "<str>",
+   "wireless_2g_psk_cipher": "<str>",
+   "wireless_2g_psk_key": "<str>",
+   "wireless_2g_psk_version": "<str>",
+   "wireless_2g_server": "<str>",
+   "wireless_2g_ssid": "<str>",
+   "wireless_2g_txpower": "<str>",
+   "wireless_2g_vlanid": "<str>",
+   "wireless_2g_wds_status": "<str>",
+   "wireless_2g_wep_format1": "<str>",
+   "wireless_2g_wep_format2": "<str>",
+   "wireless_2g_wep_format3": "<str>",
+   "wireless_2g_wep_format4": "<str>",
+   "wireless_2g_wep_key1": "<str>",
+   "wireless_2g_wep_key2": "<str>",
+   "wireless_2g_wep_key3": "<str>",
+   "wireless_2g_wep_key4": "<str>",
+   "wireless_2g_wep_mode": "<str>",
+   "wireless_2g_wep_select": "1",
+   "wireless_2g_wep_type1": "<str>",
+   "wireless_2g_wep_type2": "<str>",
+   "wireless_2g_wep_type3": "<str>",
+   "wireless_2g_wep_type4": "<str>",
+   "wireless_2g_wpa_cipher": "<str>",
+   "wireless_2g_wpa_key": "<str>",
+   "wireless_2g_wpa_version": "<str>",
+   "wireless_2g_wps_state": "<str>",
+   "wireless_5g_airtime_fairness": "off",
+   "wireless_5g_channel": "<str>",
+   "wireless_5g_current_channel": "<str>",
+   "wireless_5g_disabled": "off",
+   "wireless_5g_disabled_all": "off",
+   "wireless_5g_disabled_by": "<str>",
+   "wireless_5g_enable": "on",
+   "wireless_5g_enable_portal_multissid": "off",
+   "wireless_5g_encryption": "<str>",
+   "wireless_5g_extinfo": {
+    "support_band": "<str>",
+    "support_guest_dynpasswd": "no",
+    "wds_guest_compatible": "no"
+   },
+   "wireless_5g_hidden": "off",
+   "wireless_5g_htmode": "<str>",
+   "wireless_5g_hwmode": "<str>",
+   "wireless_5g_macaddr": "<str>",
+   "wireless_5g_mu_mimo": "on",
+   "wireless_5g_port": "<str>",
+   "wireless_5g_psk_cipher": "<str>",
+   "wireless_5g_psk_key": "<str>",
+   "wireless_5g_psk_version": "<str>",
+   "wireless_5g_server": "<str>",
+   "wireless_5g_ssid": "<str>",
+   "wireless_5g_txpower": "<str>",
+   "wireless_5g_vlanid": "<str>",
+   "wireless_5g_wds_status": "<str>",
+   "wireless_5g_wep_format1": "<str>",
+   "wireless_5g_wep_format2": "<str>",
+   "wireless_5g_wep_format3": "<str>",
+   "wireless_5g_wep_format4": "<str>",
+   "wireless_5g_wep_key1": "<str>",
+   "wireless_5g_wep_key2": "<str>",
+   "wireless_5g_wep_key3": "<str>",
+   "wireless_5g_wep_key4": "<str>",
+   "wireless_5g_wep_mode": "<str>",
+   "wireless_5g_wep_select": "1",
+   "wireless_5g_wep_type1": "<str>",
+   "wireless_5g_wep_type2": "<str>",
+   "wireless_5g_wep_type3": "<str>",
+   "wireless_5g_wep_type4": "<str>",
+   "wireless_5g_wpa_cipher": "<str>",
+   "wireless_5g_wpa_key": "<str>",
+   "wireless_5g_wpa_version": "<str>",
+   "wireless_5g_wps_state": "<str>",
+   "wireless_6g_airtime_fairness": "off",
+   "wireless_6g_channel": "<str>",
+   "wireless_6g_current_channel": "<str>",
+   "wireless_6g_disabled": "off",
+   "wireless_6g_disabled_all": "off",
+   "wireless_6g_disabled_by": "<str>",
+   "wireless_6g_enable": "on",
+   "wireless_6g_encryption": "<str>",
+   "wireless_6g_extinfo": {
+    "support_band": "<str>",
+    "support_guest_dynpasswd": "no",
+    "wds_guest_compatible": "no"
+   },
+   "wireless_6g_hidden": "off",
+   "wireless_6g_htmode": "<str>",
+   "wireless_6g_hwmode": "<str>",
+   "wireless_6g_macaddr": "<str>",
+   "wireless_6g_mu_mimo": "on",
+   "wireless_6g_port": "<str>",
+   "wireless_6g_psc": "on",
+   "wireless_6g_psk_cipher": "<str>",
+   "wireless_6g_psk_key": "<str>",
+   "wireless_6g_psk_version": "<str>",
+   "wireless_6g_server": "<str>",
+   "wireless_6g_ssid": "<str>",
+   "wireless_6g_txpower": "<str>",
+   "wireless_6g_wds_status": "<str>",
+   "wireless_6g_wep_format1": "<str>",
+   "wireless_6g_wep_format2": "<str>",
+   "wireless_6g_wep_format3": "<str>",
+   "wireless_6g_wep_format4": "<str>",
+   "wireless_6g_wep_key1": "<str>",
+   "wireless_6g_wep_key2": "<str>",
+   "wireless_6g_wep_key3": "<str>",
+   "wireless_6g_wep_key4": "<str>",
+   "wireless_6g_wep_mode": "<str>",
+   "wireless_6g_wep_select": "1",
+   "wireless_6g_wep_type1": "<str>",
+   "wireless_6g_wep_type2": "<str>",
+   "wireless_6g_wep_type3": "<str>",
+   "wireless_6g_wep_type4": "<str>",
+   "wireless_6g_wpa_cipher": "<str>",
+   "wireless_6g_wpa_key": "<str>",
+   "wireless_6g_wpa_version": "<str>",
+   "wireless_6g_wps_state": "<str>",
+   "wireless_wps_active": "on",
+   "wps_enable": "on"
+  }
+ },
+ "status?form=internet": {
+  "op": "read",
+  "shape": {
+   "internet_status": "<str>",
+   "modem_internet_status": "<str>",
+   "wan_internet_status": "<str>",
+   "wanlan_internet_status": "<str>"
+  }
+ },
+ "status?form=menu_status": {
+  "op": "read",
+  "shape": {
+   "patrol_mark": "0"
+  }
+ },
+ "status?form=router": {
+  "op": "read",
+  "shape": [
+   {
+    "duplex": "<str>",
+    "is_wan": "bool",
+    "link_status": "<str>",
+    "name": "<str>",
+    "speed": "int",
+    "status": "<str>"
+   }
+  ]
+ },
+ "status?form=status_wireless_multi_ssid": {
+  "op": "read",
+  "shape": {}
+ },
+ "status?form=user_experience_plan_switch": {
+  "op": "read",
+  "shape": {
+   "enable": "off"
+  }
+ },
+ "status?form=wan_cable_match_stat": {
+  "error": "no such callback"
+ },
+ "status?form=wan_dual_nat_state": {
+  "op": "read",
+  "shape": {
+   "wan_dual_nat": "<str>"
+  }
+ },
+ "status?form=wan_speed": {
+  "op": "read",
+  "shape": {
+   "down_speed": "int",
+   "test_time": "int",
+   "up_speed": "int"
+  }
+ },
+ "syslog?form=mail": {
+  "op": "read",
+  "shape": {
+   "auth": "off",
+   "auto_mail": "off",
+   "auto_mail_type": "<str>",
+   "every_day_time": "<str>",
+   "every_hours": "<str>"
+  }
+ },
+ "system?form=sysmode": {
+  "op": "read",
+  "shape": {
+   "mode": "<str>",
+   "support": "yes"
+  }
+ },
+ "time?form=dst": {
+  "op": "read",
+  "shape": {
+   "date": "<str>",
+   "dst_enable": "on",
+   "dst_status": "<str>",
+   "end_day": "<str>",
+   "end_hour": "<str>",
+   "end_month": "<str>",
+   "end_week": "<str>",
+   "start_day": "<str>",
+   "start_hour": "<str>",
+   "start_month": "<str>",
+   "start_week": "<str>",
+   "time": "<str>"
+  }
+ },
+ "time?form=hour24": {
+  "op": "read",
+  "shape": {
+   "date": "<str>",
+   "hour24_enable": "off",
+   "hour24_support": "yes",
+   "time": "<str>"
+  }
+ },
+ "time?form=settings": {
+  "op": "read",
+  "shape": {
+   "date": "<str>",
+   "day": "<str>",
+   "hour24_enable": "off",
+   "hour24_support": "yes",
+   "ntp_svr1": "<str>",
+   "ntp_svr2": "<str>",
+   "quicksetup": "yes",
+   "time": "<str>",
+   "time_format": "<str>",
+   "timezone": "<str>",
+   "type": "<str>"
+  }
+ },
+ "time_machine?form=contents": {
+  "op": "read",
+  "shape": {}
+ },
+ "time_machine?form=settings": {
+  "op": "read",
+  "shape": {
+   "capacity": "int",
+   "disk_status": "1",
+   "enable": "off",
+   "free": "int",
+   "limitsize": "0",
+   "mntdir": "<str>"
+  }
+ },
+ "upnp?form=enable": {
+  "op": "read",
+  "shape": {
+   "enable": "on"
+  }
+ },
+ "upnp?form=service": {
+  "op": "read",
+  "shape": [
+   {
+    "external_port": "<str>",
+    "internal_port": "<str>",
+    "ipaddr": "<str>",
+    "leasetime": "<str>",
+    "name": "<str>",
+    "protocol": "<str>"
+   }
+  ]
+ },
+ "usbmodem?form=isplist": {
+  "op": "read",
+  "shape": {
+   "location341": {
+    "isp0": {
+     "apn": "<str>",
+     "dial_num": "<str>",
+     "isp_mnc": "<str>",
+     "isp_name": "<str>",
+     "password": "<str>",
+     "username": "<str>"
+    },
+    "isp1": {
+     "apn": "<str>",
+     "dial_num": "<str>",
+     "isp_mnc": "<str>",
+     "isp_name": "<str>",
+     "password": "<str>",
+     "username": "<str>"
+    },
+    "isp2": {
+     "apn": "<str>",
+     "dial_num": "<str>",
+     "isp_mnc": "<str>",
+     "isp_name": "<str>",
+     "password": "<str>",
+     "username": "<str>"
+    },
+    "isp3": {
+     "apn": "<str>",
+     "dial_num": "<str>",
+     "isp_mnc": "<str>",
+     "isp_name": "<str>",
+     "password": "<str>",
+     "username": "<str>"
+    },
+    "isp4": {
+     "apn": "<str>",
+     "dial_num": "<str>",
+     "isp_mnc": "<str>",
+     "isp_name": "<str>",
+     "password": "<str>",
+     "username": "<str>"
+    },
+    "isp5": {
+     "apn": "<str>",
+     "dial_num": "<str>",
+     "isp_mnc": "<str>",
+     "isp_name": "<str>",
+     "password": "<str>",
+     "username": "<str>"
+    },
+    "isp6": {
+     "apn": "<str>",
+     "dial_num": "<str>",
+     "isp_mnc": "<str>",
+     "isp_name": "<str>",
+     "password": "<str>",
+     "username": "<str>"
+    },
+    "isp7": {
+     "apn": "<str>",
+     "dial_num": "<str>",
+     "isp_mnc": "<str>",
+     "isp_name": "<str>",
+     "password": "<str>",
+     "username": "<str>"
+    },
+    "location_mcc": "<str>",
+    "location_name": "<str>"
+   }
+  }
+ },
+ "usbmodem?form=modemset": {
+  "op": "read",
+  "shape": {
+   "apn": "<str>",
+   "authentype": "<str>",
+   "connectmode": "<str>",
+   "connectstatus": "0",
+   "cport": "<str>",
+   "defaultpid": "<str>",
+   "defaultvid": "<str>",
+   "dial_num": "<str>",
+   "dport": "<str>",
+   "ifname": "<str>",
+   "ispindex": "<str>",
+   "ispstatus": "<str>",
+   "locindex": "<str>",
+   "manualdns": "<str>",
+   "maxidletime": "<str>",
+   "message1": "<str>",
+   "message2": "<str>",
+   "modemstatus": "<str>",
+   "modeswitch": "<str>",
+   "mtu": "<str>",
+   "password": "<str>",
+   "pincode": "<str>",
+   "pinlock": "<str>",
+   "primarydns": "<str>",
+   "proto": "<str>",
+   "seconddns": "<str>",
+   "setisp": "<str>",
+   "targetpid": "<str>",
+   "targetvid": "<str>",
+   "username": "<str>"
+  }
+ },
+ "vpn?form=enable": {
+  "op": "read",
+  "shape": {
+   "enable": "on"
+  }
+ },
+ "vpn?form=server": {
+  "op": "load",
+  "shape": [
+   {
+    ".anonymous": "bool",
+    ".name": "<str>",
+    ".type": "<str>",
+    "address": "<str>",
+    "allowed_ips": "<str>",
+    "des": "<str>",
+    "download_speed": "int",
+    "enable": "on",
+    "endpoint_address": "<str>",
+    "endpoint_port": "<str>",
+    "key": "<str>",
+    "kill_switch": "on",
+    "manual": "bool",
+    "mtu": "<str>",
+    "nat": "bool",
+    "persistent_keepalive": "<str>",
+    "preshared_key": "<str>",
+    "private_key": "<str>",
+    "public_key": "<str>",
+    "ruleindex": "0",
+    "server": "<str>",
+    "status": "<str>",
+    "type": "<str>",
+    "upload_speed": "int",
+    "vendor": "<str>"
+   }
+  ]
+ },
+ "vpn?form=thirdvpn": {
+  "error": "no such callback"
+ },
+ "vpn?form=vpn_user_devices": {
+  "op": "read",
+  "shape": [
+   {
+    "client_type": "<str>",
+    "device_id": "<str>",
+    "mac": "<str>",
+    "name": "<str>",
+    "online": "int",
+    "owner_id": "<str>",
+    "prio": "off",
+    "prio_time": "<str>",
+    "time_period": "<str>"
+   }
+  ]
+ },
+ "vpn?form=vpn_user_list": {
+  "op": "load",
+  "shape": [
+   {
+    "access": "on",
+    "client_type": "<str>",
+    "mac": "<str>",
+    "name": "<str>",
+    "server_des": "<str>",
+    "server_key": "<str>"
+   }
+  ]
+ },
+ "vpn?form=wireguard": {
+  "error": "invalid vpn_name"
+ },
+ "vpnconn?form=config": {
+  "error": "no such callback"
+ },
+ "wifidog?form=portal_background": {
+  "op": "read",
+  "shape": {
+   "imgbgrpath": "<str>"
+  }
+ },
+ "wifidog?form=portal_logo": {
+  "op": "read",
+  "shape": {
+   "imglogopath": "<str>"
+  }
+ },
+ "wireguard?form=config": {
+  "op": "read",
+  "shape": {
+   "access": "<str>",
+   "address": "<str>",
+   "dns": "bool",
+   "enable": "bool",
+   "listen_port": "<str>",
+   "persistent_keepalive": "<str>",
+   "private_key": "<str>",
+   "public_key": "<str>"
+  }
+ },
+ "wireless?form=guestnetwork_bandwidth_ctrl": {
+  "op": "read",
+  "shape": {
+   "down_band_2g": "<str>",
+   "down_band_5g1": "<str>",
+   "down_band_6g": "<str>",
+   "enable_2g": "off",
+   "enable_5g1": "off",
+   "enable_6g": "off",
+   "max_download": "int",
+   "max_upload": "int",
+   "up_band_2g": "<str>",
+   "up_band_5g1": "<str>",
+   "up_band_6g": "<str>"
+  }
+ },
+ "wireless?form=guestnetwork_effectivetime_ctrl": {
+  "op": "read",
+  "shape": {
+   "effective_time": "0",
+   "remain_time": "int",
+   "type": "<str>"
+  }
+ },
+ "wireless?form=mlo_host": {
+  "op": "read",
+  "shape": {
+   "band_select": "on",
+   "enable": "on",
+   "encryption": "<str>",
+   "hidden": "off",
+   "psk_key": "<str>",
+   "psk_version": "<str>",
+   "selected_bands": [
+    "<str>"
+   ],
+   "ssid": "<str>",
+   "support": "on",
+   "support_bands": [
+    "<str>"
+   ]
+  }
+ },
+ "wireless?form=ofdma": {
+  "op": "read",
+  "shape": {
+   "enable": "off"
+  }
+ },
+ "wireless?form=ofdma_mimo": {
+  "op": "read",
+  "shape": {
+   "setting": "<str>"
+  }
+ },
+ "wireless?form=portal_content": {
+  "op": "read",
+  "shape": {
+   "content": "<str>",
+   "font_color": "<str>",
+   "font_opacity": "<str>",
+   "theme_color": "<str>",
+   "theme_opacity": "<str>",
+   "title": "<str>"
+  }
+ },
+ "wireless?form=region": {
+  "op": "read",
+  "shape": {
+   "capability": {
+    "channel_2g": [
+     "1"
+    ],
+    "channel_5g": [
+     "<str>"
+    ],
+    "channel_6g": [
+     "<str>"
+    ],
+    "htmode_2g": [
+     "<str>"
+    ],
+    "htmode_5g": [
+     "<str>"
+    ],
+    "htmode_6g": [
+     "<str>"
+    ],
+    "hwmode_2g": [
+     "<str>"
+    ],
+    "hwmode_5g": [
+     "<str>"
+    ],
+    "hwmode_6g": [
+     "<str>"
+    ],
+    "pscChannelList": [
+     "<str>"
+    ]
+   },
+   "country": "<str>",
+   "region_list": {},
+   "region_select_permission": "<str>",
+   "support_please_select": "yes",
+   "support_smart_connect": "yes",
+   "support_wireless_schedule": "yes"
+  }
+ },
+ "wireless?form=smart_connect": {
+  "op": "read",
+  "shape": {
+   "smart_enable": "off"
+  }
+ },
+ "wireless?form=syspara_wps": {
+  "op": "read",
+  "shape": {
+   "wait_time": "int",
+   "wps": "on"
+  }
+ },
+ "wireless?form=twt": {
+  "op": "read",
+  "shape": {
+   "enable": "on"
+  }
+ },
+ "wireless?form=wireless": {
+  "error": "no such callback"
+ },
+ "wireless?form=wireless_addition_setting": {
+  "op": "read",
+  "shape": {
+   "airtime_fairness": "off",
+   "beacon_int": "<str>",
+   "bssid": "<str>",
+   "channel": "<str>",
+   "disabled": "off",
+   "dtim_period": "1",
+   "enable": "off",
+   "encryption": "<str>",
+   "extinfo": {
+    "support_band": "<str>",
+    "support_guest_dynpasswd": "no",
+    "wds_guest_compatible": "no"
+   },
+   "frag": "<str>",
+   "isolate": "off",
+   "psk_key": "<str>",
+   "rts": "<str>",
+   "shortgi": "on",
+   "ssid": "<str>",
+   "usb_interference_reduction": "off",
+   "wds_mode": "0",
+   "wep_format1": "<str>",
+   "wep_format2": "<str>",
+   "wep_format3": "<str>",
+   "wep_format4": "<str>",
+   "wep_key1": "<str>",
+   "wep_key2": "<str>",
+   "wep_key3": "<str>",
+   "wep_key4": "<str>",
+   "wep_mode": "<str>",
+   "wep_select": "1",
+   "wep_type1": "<str>",
+   "wep_type2": "<str>",
+   "wep_type3": "<str>",
+   "wep_type4": "<str>",
+   "wmm": "on",
+   "wpa_group_rekey": "0",
+   "zerowait_dfs": "off"
+  }
+ },
+ "wireless?form=wps_connect": {
+  "op": "read",
+  "shape": {
+   "available": "bool",
+   "disabled": "off",
+   "wps_timeout": "int"
+  }
+ },
+ "wireless?form=wps_pin": {
+  "op": "read",
+  "shape": {
+   "lock_2g": "<str>",
+   "lock_5g": "<str>",
+   "lock_6g": "<str>",
+   "wps_label": "off",
+   "wps_pin": "<str>"
+  }
+ },
+ "wireless_schedule_v2?form=settings": {
+  "op": "read",
+  "shape": {
+   "enable": "bool",
+   "list": {},
+   "max_rules": "int"
+  }
+ },
+ "yandex_dns?form=enable": {
+  "op": "read",
+  "shape": {
+   "host_mac": "<str>"
+  }
+ }
+}
