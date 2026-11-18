@@ -259,8 +259,7 @@ _CURATED: list[Endpoint] = [
     _ep("nat?form=pt", kind="table", section="port_triggering", read_op="load",
         table_ops=("insert", "update", "remove"), key_field="name",
         verified={"insert": "ui", "update": "ui", "remove": "ui", "load": "ui"}),
-    _ep("nat?form=dmz", section="dmz", write_fields=("enable", "ipaddr"), keeps_blank=("ipaddr",),
-        verified={"write": "ui"}, note="The router keeps the last DMZ address when it is cleared (harmless while off)."),
+    _ep("nat?form=dmz", section="dmz", write_fields=("enable", "ipaddr"), verified={"write": "ui"}),
     _ep("nat?form=alg", section="alg",
         write_fields=("ftp", "h323", "ipsec", "l2tp", "pptp", "rtsp", "sip", "tftp"), verified={"write": "ui"}),
     # ---- QoS / system -----------------------------------------------------------------
@@ -417,13 +416,13 @@ _EXTRA: list[Endpoint] = [
     _ep("wireless?form=twt", section="twt", write_fields=("enable",), verified={"write": "ui"}),
     _ep("ffs?form=config", section="fast_roaming_ssid", write_fields=("enable",), verified={"write": "ui"}),
     _ep("wireless?form=mlo_host", section="mlo_wifi",
-        write_fields=("enable", "ssid", "hidden", "encryption", "psk_key", "psk_version", "selected_bands",
-                      "band_select"),
+        write_fields=("enable", "ssid", "hidden", "encryption", "psk_key", "psk_version", "selected_bands"),
         secret_fields=("psk_key",), list_fields=("selected_bands",), op_risk={"write": CRITICAL},
         verified={"write": "live"},
-        note="Wi-Fi 7 multi-link (MLO) network. Off = ONLY enable=off. On = the UI's fields + selected_bands "
-             "(repeated) + band_select=on (without it MLO stays off). A write without selected_bands switched MLO "
-             "off and made the firmware drop an internal per-band field, breaking WPS until a config restore."),
+        note="Wi-Fi 7 multi-link (MLO) network. Off = ONLY enable=off. On = exactly the web UI's 7 fields, "
+             "selected_bands as a repeated key with at least two bands (band_select is read-only; the UI never "
+             "sends it). A write without selected_bands switched MLO off and made the firmware drop an internal "
+             "per-band field, breaking WPS until a config restore."),
     _ep("wireless?form=wireless_addition_setting", section="wifi_advanced",
         write_fields=("airtime_fairness", "beacon_int", "dtim_period", "isolate", "rts", "shortgi", "wmm",
                       "wpa_group_rekey", "zerowait_dfs"),

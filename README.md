@@ -24,6 +24,7 @@ the same pipeline: **dry run → review → apply → verify → journal → und
   `no_effect`, not "success".
 * **Field-tested.** 84 write operations were exercised live across an Archer BE9300 (firmware
   1.2.4) and an Archer BE4800 (older, encrypted firmware): change, verify, undo, verify restored.
+  The BE4800 runs were repeated after the 1.0.1 transport fix (all but access control).
   More than a dozen firmware quirks found that way are handled for you (see
   [Firmware quirks](#firmware-quirks-handled)). `router_catalog` marks every operation `live`,
   `ui` (from the web UI's code) or `none`.
@@ -64,7 +65,10 @@ Read tools are annotated `readOnlyHint`; write tools are annotated `destructiveH
 ## How it talks to the router
 
 * **Login:** `tplinkrouterc6u.TplinkRouterV1_11(...).authorize()` (RSA login), or the encrypted
-  `TplinkRouter` for older firmware.
+  `TplinkRouter` for older firmware. On the encrypted protocol the library is used only for login
+  and AES; the body still goes out as the web UI's form string. (The library's JSON adapter, made for
+  the BE805, collapses repeated keys, drops blank values and copies fields into the URL, so it is
+  bypassed. That adapter was why MLO couldn't be switched on through earlier versions on a BE4800.)
 * **Requests:** our own `application/x-www-form-urlencoded` POST to
   `/cgi-bin/luci/;stok=<stok>/admin/<module>?form=<form>`, the same requests the web UI sends. The
   URL carries only `?form=`; `operation` and every field go in the body. Multipart is used for
@@ -188,18 +192,20 @@ Found against a live BE9300 (fw 1.2.4); each one is encoded in the catalog or th
   Anything allowlisting your old IP (cloud firewalls, DNS-filter locations) will need updating.
 * **Admin password** fields are RSA-encrypted with per-field keys from the read. The server
   encrypts at send time, so the dry run's confirm token stays valid.
-* **MLO network:** off = only `enable=off`. On = the web UI's fields plus `selected_bands` (repeated)
-  and `band_select=on`. A malformed MLO write switched MLO off **and made the firmware drop an
-  internal per-band field (`disabled_by`)**: Wi-Fi kept working, but every WPS start failed
-  ("Interface return exception") until a config restore. Turning MLO back on from off worked on a
-  BE9300 but not on a BE4800 (use the web page there).
+* **MLO network:** off = only `enable=off`. On = exactly the web UI's 7 fields, with `selected_bands`
+  as a repeated key and at least two bands (`band_select` is read-only, and the UI never sends it).
+  The recipe was taken from a capture of the BE4800 web page's own requests, then switched off/on
+  twice through the tool on a BE4800, with an empty wireless-config diff afterwards. A malformed MLO
+  write on a BE9300 once switched MLO off **and made the firmware drop an internal per-band field
+  (`disabled_by`)**: Wi-Fi kept working, but every WPS start failed ("Interface return exception")
+  until a config restore. After every Wi-Fi change the server now reads the WPS page as a health
+  check.
 * **User-permission switches** are accepted but ignored for a normal admin login (`no_effect`).
 * **Eco mode** takes `strong` / `medium` / `weak`; DST and the 24-hour clock use `dst_enable` /
   `hour24_enable`.
 * **USB sharing** is saved as ONE request (server name + `enable="on,off,off"` for Samba/FTP/FTP-internet);
   per-service saves are refused. The server name can't be written on its own.
-* **Fields the router keeps when blanked** (the DMZ address, the custom WAN MAC) don't count as a
-  failed restore.
+* **Fields the router keeps when blanked** (the custom WAN MAC) don't count as a failed restore.
 * **TP-Link DDNS** has no refresh operation (it updates itself).
 
 ## Known limitations

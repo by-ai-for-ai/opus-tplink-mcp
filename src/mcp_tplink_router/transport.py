@@ -252,9 +252,19 @@ class EncryptedRouterTransport:
     """Transport for older firmware (e.g. Archer BE4800 1.0.x) with the ENCRYPTED LuCI protocol.
 
     Login is ``tplinkrouterc6u.TplinkRouter(...).authorize()`` (RSA keys + sequence), and every
-    request goes through that client's own ``request()``, which AES-encrypts the form body and
-    decrypts the reply.  The password is fetched from ``password_getter`` at login only.
+    request is AES-encrypted by that client and its reply decrypted.  The password is fetched
+    from ``password_getter`` at login only.
+
+    The body is sent exactly as the router's own web page sends it: a form-urlencoded string with
+    ``Content-Type: application/x-www-form-urlencoded``.  The library's ``TplinkRouterJson.request``
+    (written for the BE805) is deliberately skipped, because it re-encodes the body as JSON with
+    ``dict(parse_qsl(...))``, which (1) collapses repeated keys to the last value (so a list such as
+    MLO ``selected_bands=2g&selected_bands=5g`` arrives as just ``"5g"`` and the router silently
+    refuses the change), (2) drops blank values, and (3) copies every field, secrets included,
+    into the URL query string.
     """
+
+    FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 
     def __init__(self, host: str, password_getter: Callable[[], str], *, timeout: float = 20.0,
                  client_factory: Callable[[str, str, int], Any] | None = None) -> None:
@@ -304,6 +314,30 @@ class EncryptedRouterTransport:
         except Exception as exc:  # noqa: BLE001
             logger.debug("logout failed: %r", exc)
 
+    def _form_request(self, path: str, body: str) -> Any:
+        """Send ``body`` as a form, through the client's encryption but past its JSON adapter."""
+        client = self._router
+        if self._client_factory is not None:  # injected client (tests / custom): use it as-is
+            return client.request(path, body, ignore_errors=True)
+        try:
+            from tplinkrouterc6u.client.c6u import TplinkRouterJson
+        except ImportError as exc:  # fail closed: never fall back to the JSON adapter
+            raise RouterError(E_BAD_REPLY, "unsupported tplinkrouterc6u layout (TplinkRouterJson not found); "
+                                           "install the pinned version") from exc
+        if not isinstance(client, TplinkRouterJson):
+            raise RouterError(E_BAD_REPLY, f"unsupported tplinkrouterc6u client {type(client).__name__}; "
+                                           "install the pinned version")
+        headers = client._headers_request  # noqa: SLF001 - instance dict owned by the client
+        saved = headers.get("Content-Type")
+        headers["Content-Type"] = self.FORM_CONTENT_TYPE
+        try:
+            return super(TplinkRouterJson, client).request(path, body, ignore_errors=True)
+        finally:
+            if saved is None:
+                headers.pop("Content-Type", None)
+            else:
+                headers["Content-Type"] = saved
+
     def call(self, path: str, op: str, fields: dict[str, str] | None = None, *,
              timeout: float | None = None) -> Any:  # noqa: ARG002 - the library owns the timeout
         from urllib.parse import urlencode
@@ -312,7 +346,7 @@ class EncryptedRouterTransport:
             raise RouterError(E_LOGIN, "not logged in")
         body = urlencode({**({"operation": op} if op else {}), **check_fields(fields)}, doseq=True)
         try:
-            res = self._router.request(f"admin/{path.lstrip('/')}", body, ignore_errors=True)
+            res = self._form_request(f"admin/{path.lstrip('/')}", body)
         except Exception as exc:  # noqa: BLE001 - requests errors + the library's ClientError
             name = type(exc).__name__
             if "Timeout" in name:

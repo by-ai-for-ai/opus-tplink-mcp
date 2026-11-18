@@ -113,7 +113,7 @@ def wifi_extra(ctx: Ctx) -> Any:
 
 
 
-MLO_FIELDS = ("enable", "ssid", "hidden", "encryption", "psk_key", "psk_version", "selected_bands", "band_select")
+MLO_FIELDS = ("enable", "ssid", "hidden", "encryption", "psk_key", "psk_version", "selected_bands")
 
 
 def _mlo(ctx: Ctx, settings: dict[str, Any]) -> Any:
@@ -132,17 +132,15 @@ def _mlo(ctx: Ctx, settings: dict[str, Any]) -> Any:
     if want.get("enable") == "on":
         if not want.get("selected_bands"):
             raise UsageError("MLO needs selected_bands (e.g. ['5g', '6g'])")
-        want["band_select"] = "on"  # live: re-enabling without band_select=on leaves MLO off
+        if len(want["selected_bands"]) < 2:
+            raise UsageError("MLO needs at least two selected_bands")
     if all(forms.cmp_value(want.get(k)) == forms.cmp_value(full.get(k)) for k in want):
         return {"status": "no_change", "current": cur}
-    restore = {**full, "band_select": "on"} if full.get("enable") == "on" else {"enable": "off"}
+    restore = full if full.get("enable") == "on" else {"enable": "off"}
     send = {"enable": "off"} if want.get("enable") == "off" else want
     plan = ctx.plan("wifi_extra", "MLO network: " + ", ".join(f"{k}={'<secret>' if k == 'psk_key' else v}"
                                                              for k, v in settings.items()), path)
     plan.secret_fields = ("psk_key",)
     plan.add(forms.plan_custom(path, "write", send, label="MLO", inverse={"op": "write", "fields": restore}))
     plan.critical_reasons.append("MLO changes rebuild the Wi-Fi interfaces; MLO clients drop for ~30 s")
-    if want.get("enable") == "on" and full.get("enable") != "on":
-        plan.warnings.append("turning MLO ON from off worked live on a BE9300 but NOT on a BE4800 (the router "
-                             "accepts the write and stays off): if it stays off, switch it on from the web page")
     return plan

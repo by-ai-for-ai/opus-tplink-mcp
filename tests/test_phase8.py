@@ -389,7 +389,13 @@ def test_lan_agg_always_sends_port_settings_as_json(apply: Any, fake: FakeTransp
     assert json.loads(w["port_settings"]) == [{"name": "lan2", "enable": True}] and w["hashmode"] == "1"
 
 
-def test_blank_restore_kept_by_router_is_not_a_failure(apply: Any, call: Any, fake: FakeTransport) -> None:
+def test_blank_restore_kept_by_router_is_not_a_failure(apply: Any, call: Any, fake: FakeTransport,
+                                                       monkeypatch: Any) -> None:
+    # keeps_blank is per-endpoint (live: the BE9300's custom WAN MAC); exercised here on a simple form
+    from dataclasses import replace
+
+    from mcp_tplink_router import catalog
+    monkeypatch.setitem(catalog.CURATED, "nat?form=dmz", replace(catalog.CURATED["nat?form=dmz"], keeps_blank=("ipaddr",)))
     fake.state["nat?form=dmz"] = {"enable": "off", "ipaddr": ""}
     out = apply("port_forwarding", kind="dmz", action="enable", ip="192.168.0.250")
     fake.custom[("nat?form=dmz", "write")] = lambda f: fake.state["nat?form=dmz"].update(
@@ -410,7 +416,9 @@ def test_mlo_off_sends_only_enable_and_undo_restores_ui_fields(apply: Any, call:
     d = call("router_undo", id=out["journal_id"])
     call("router_undo", id=out["journal_id"], apply=True, **({"confirm_token": d["confirm_token"]} if "confirm_token" in d else {}))
     w = [f for p, o, f in fake.calls if p == "wireless?form=mlo_host" and o == "write"][-1]
-    assert w["selected_bands"] == ["5g", "6g"] and w["band_select"] == "on" and w["enable"] == "on"
+    assert w["selected_bands"] == ["5g", "6g"] and w["enable"] == "on"
+    assert sorted(w) == sorted(("enable", "ssid", "hidden", "encryption", "psk_key", "psk_version", "selected_bands"))
+    assert "error" in call("wifi_extra", action="mlo", enable=True, settings={"selected_bands": ["5g"]})
     assert "support" in call("wifi_extra", action="mlo", settings={"support": "off"})["error"]
 
 
