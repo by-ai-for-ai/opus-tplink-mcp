@@ -123,7 +123,7 @@ class Ctx:
             conn = ("guest" if d.get("isGuest") or "guest" in tag else "wired" if "wire" in tag
                     else "iot" if tag.startswith("iot") else "wireless")
             ip = d.get("ip")
-            out.append({"mac": mac, "ip": None if ip in ("", "0.0.0.0") else ip, "name": d.get("deviceName"),
+            out.append({"mac": mac, "ip": None if ip in ("", "0.0.0.0") else ip, "name": d.get("deviceName"),  # nosec B104 - "no address" placeholder, not a bind
                         "connection": conn, "band": d.get("deviceTag")})
         return out
 
