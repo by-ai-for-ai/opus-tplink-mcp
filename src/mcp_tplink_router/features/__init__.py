@@ -63,6 +63,13 @@ class Ctx:
         return dict(v)
 
     # -- cached reads ------------------------------------------------------------------
+    def device_config(self) -> dict[str, Any]:
+        """The router's capability flags where the transport can read them (encrypted firmware), else {}."""
+        if "device_config" not in self._cache:
+            fn = getattr(self.t, "device_config", None)
+            self._cache["device_config"] = (fn() if callable(fn) else None) or {}
+        return self._cache["device_config"]  # type: ignore[no-any-return]
+
     def read(self, path: str) -> dict[str, Any]:
         key = "r:" + path
         if key not in self._cache:
@@ -87,8 +94,8 @@ class Ctx:
         except RouterError:
             st = self.read("status?form=client_status")  # older firmware (BE4800)
         out = []
-        for src, conn in (("access_devices_wired", "wired"), ("access_devices_wireless_host", "wireless"),
-                          ("access_devices_wireless_guest", "guest")):
+        lists = ("access_devices_wired", "access_devices_wireless_host", "access_devices_wireless_guest")
+        for src, conn in zip(lists, ("wired", "wireless", "guest")):
             for d in st.get(src) or []:
                 try:
                     mac = normalize_mac(d.get("macaddr", ""))
@@ -96,6 +103,28 @@ class Ctx:
                     continue
                 out.append({"mac": mac, "ip": d.get("ipaddr"), "name": d.get("hostname"),
                             "connection": d.get("wire_type") or conn})
+        if not any(k in st for k in lists):
+            out = self._clients_from_device_list()
+        return out
+
+    def _clients_from_device_list(self) -> list[dict[str, Any]]:
+        """Encrypted-protocol firmware (BE4800, BE3600) has no client lists in status?form=all; the web
+        UI's connected-clients view reads smart_network?form=game_accelerator operation=loadDevice."""
+        rows = safe_read(self, "smart_network?form=game_accelerator", "loadDevice")
+        out = []
+        for d in rows if isinstance(rows, list) else []:
+            if not isinstance(d, dict):
+                continue
+            try:
+                mac = normalize_mac(d.get("mac", ""))
+            except ValueError:
+                continue
+            tag = str(d.get("deviceTag") or "").lower()
+            conn = ("guest" if d.get("isGuest") or "guest" in tag else "wired" if "wire" in tag
+                    else "iot" if tag.startswith("iot") else "wireless")
+            ip = d.get("ip")
+            out.append({"mac": mac, "ip": None if ip in ("", "0.0.0.0") else ip, "name": d.get("deviceName"),
+                        "connection": conn, "band": d.get("deviceTag")})
         return out
 
     @property

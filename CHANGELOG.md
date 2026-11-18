@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.2 (2026-11-18)
+
+### Added
+- **Archer BE3600 v2 (fw 1.0.4)** tested live: the full runbook (22 change types, each undone and
+  verified), MLO on/off, USB sharing and partitions, HTTPS remote management, reboot, and all reads.
+- **Published on PyPI** (`pip install opus-tplink-mcp`, `uvx opus-tplink-mcp`) through a GitHub
+  workflow with Trusted Publishing (no stored token). An `opus-tplink-mcp` command was added next to
+  `mcp-tplink-router`.
+- MLO on models that reboot after an MLO change (the router's `mloNetwork.reboot` flag): the dry
+  run says so, and the result reports `router_rebooting` instead of running the Wi-Fi health check
+  against a router that is going down.
+
+### Fixed
+- `clients action=list` was empty on encrypted-protocol firmware (BE4800, BE3600). It now falls back
+  to the web UI's `smart_network?form=game_accelerator` `loadDevice` source.
+
 ## 1.0.1 (2026-11-18)
 
 ### Fixed

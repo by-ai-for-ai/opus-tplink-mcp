@@ -142,5 +142,10 @@ def _mlo(ctx: Ctx, settings: dict[str, Any]) -> Any:
                                                              for k, v in settings.items()), path)
     plan.secret_fields = ("psk_key",)
     plan.add(forms.plan_custom(path, "write", send, label="MLO", inverse={"op": "write", "fields": restore}))
-    plan.critical_reasons.append("MLO changes rebuild the Wi-Fi interfaces; MLO clients drop for ~30 s")
+    if (ctx.device_config().get("mloNetwork") or {}).get("reboot"):
+        # the web UI: "The router will reboot after saving your new MLO settings" (live: Archer BE3600)
+        plan.reboots = "the router reboots after an MLO change: about 2-3 minutes without network"
+        plan.critical_reasons.append(plan.reboots)
+    else:
+        plan.critical_reasons.append("MLO changes rebuild the Wi-Fi interfaces; MLO clients drop for ~30 s")
     return plan

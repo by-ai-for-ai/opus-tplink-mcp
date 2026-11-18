@@ -314,6 +314,23 @@ class EncryptedRouterTransport:
         except Exception as exc:  # noqa: BLE001
             logger.debug("logout failed: %r", exc)
 
+    def device_config(self) -> dict[str, Any] | None:
+        """The web UI's capability flags (device_config?form=config).  This form is outside /admin/ and
+        answered in plain JSON, so it is fetched directly with the session cookie.  None if unavailable."""
+        client = self._router
+        try:
+            import requests
+
+            resp = requests.post(f"{client.host}/cgi-bin/luci/;stok={client._stok}/device_config?form=config",  # noqa: SLF001
+                                 data="operation=read", cookies={"sysauth": client._sysauth},  # noqa: SLF001
+                                 headers={"Content-Type": self.FORM_CONTENT_TYPE, "Referer": client.host + "/"},
+                                 verify=False, timeout=self._timeout)  # nosec B501 - routers use self-signed certs
+            data = resp.json().get("data")
+        except Exception as exc:  # noqa: BLE001 - optional information
+            logger.debug("device_config unavailable: %r", exc)
+            return None
+        return data if isinstance(data, dict) else None
+
     def _form_request(self, path: str, body: str) -> Any:
         """Send ``body`` as a form, through the client's encryption but past its JSON adapter."""
         client = self._router

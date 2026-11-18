@@ -435,3 +435,32 @@ def test_wifi_change_reports_health_and_auto_backup(apply: Any, fake: FakeTransp
     assert out["wifi_health"]["ok"] is False and any("DAMAGED" in w for w in out["warnings_after"])
     crit = apply("internet", action="set", proto="dhcp", settings={"mtu": "1480"})
     assert crit["pre_change_backup"]["bytes"] > 0
+
+
+def test_clients_fall_back_to_load_device_on_encrypted_firmware(call: Any, fake: FakeTransport) -> None:
+    # BE4800 / BE3600: status?form=all has no access_devices_* lists; the UI uses loadDevice
+    fake.state["status?form=all"] = {"wan_ipv4_ipaddr": "192.0.2.10", "lan_ipv4_ipaddr": "192.168.1.1"}
+    fake.custom[("smart_network?form=game_accelerator", "loadDevice")] = lambda f: [
+        {"mac": "02-00-00-00-00-01", "ip": "192.168.1.127", "deviceName": "Phone", "deviceTag": "iot_2.4G",
+         "isGuest": False},
+        {"mac": "02-00-00-00-00-02", "ip": "0.0.0.0", "deviceName": "Laptop", "deviceTag": "5G", "isGuest": False},
+        {"mac": "02-00-00-00-00-03", "ip": "192.168.1.9", "deviceName": "PC", "deviceTag": "wired", "isGuest": False},
+        {"mac": "02-00-00-00-00-04", "ip": "192.168.1.8", "deviceName": "Visitor", "deviceTag": "5G", "isGuest": True}]
+    rows = call("clients", action="list")["clients"]
+    assert [(r["name"], r["connection"], r["ip"]) for r in rows] == [
+        ("Phone", "iot", "192.168.1.127"), ("Laptop", "wireless", None), ("PC", "wired", "192.168.1.9"),
+        ("Visitor", "guest", "192.168.1.8")]
+
+
+def test_mlo_change_on_a_rebooting_model_reports_the_reboot(apply: Any, call: Any, fake: FakeTransport) -> None:
+    # Archer BE3600: device_config mloNetwork.reboot = true -> the router reboots after an MLO save
+    fake.device_config = lambda: {"mloNetwork": {"mlo": True, "reboot": True, "rebootType": ["all"]}}
+    fake.state["wireless?form=mlo_host"] = {"enable": "off", "ssid": "Home", "hidden": "off", "encryption": "psk_sae",
+                                            "psk_key": "k-secret-1", "psk_version": "sae_only",
+                                            "selected_bands": ["2g", "5g"]}
+    dry = call("wifi_extra", action="mlo", enable=True)
+    assert any("reboots" in r for r in dry["critical_because"])
+    n = len(fake.calls)
+    out = apply("wifi_extra", action="mlo", enable=True)
+    assert out["router_rebooting"] and out["wifi_health"]["ok"] is None
+    assert not any(p == "wireless?form=wps_pin" for p, _, _ in fake.calls[n:])  # no health probe on a rebooting router

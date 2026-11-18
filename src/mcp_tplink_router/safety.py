@@ -164,6 +164,7 @@ class Plan:
     undo_of: str | None = None
     secret_fields: tuple[str, ...] = ()
     router: str = "main"
+    reboots: str = ""  # non-empty: the router reboots by itself after this change (text says how long)
 
     @property
     def risk(self) -> str:
@@ -396,7 +397,10 @@ def finalize(t: Any, plan: Plan, args: dict[str, Any], journal: Journal, reopen:
     result = apply_plan(t, plan, journal, reopen)
     if pre_backup:
         result["pre_change_backup"] = pre_backup
-    if any(s.url_path.startswith("wireless?") for s in plan.steps) and result.get("status") != "failed":
+    if plan.reboots and result.get("status") != "failed":
+        result["router_rebooting"] = plan.reboots
+        result["wifi_health"] = {"ok": None, "note": "not checked: the router is rebooting; re-check when it is back"}
+    elif any(s.url_path.startswith("wireless?") for s in plan.steps) and result.get("status") != "failed":
         health = wifi_health(t)
         result["wifi_health"] = health
         if health.get("ok") is False:

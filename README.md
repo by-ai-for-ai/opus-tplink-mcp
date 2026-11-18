@@ -24,7 +24,8 @@ the same pipeline: **dry run → review → apply → verify → journal → und
   `no_effect`, not "success".
 * **Field-tested.** 84 write operations were exercised live across an Archer BE9300 (firmware
   1.2.4) and an Archer BE4800 (older, encrypted firmware): change, verify, undo, verify restored.
-  The BE4800 runs were repeated after the 1.0.1 transport fix (all but access control).
+  The BE4800 runs were repeated after the 1.0.1 transport fix (all but access control). An Archer
+  BE3600 (fw 1.0.4) passed the same runbook plus MLO and USB (see [Tested routers](#tested-routers)).
   More than a dozen firmware quirks found that way are handled for you (see
   [Firmware quirks](#firmware-quirks-handled)). `router_catalog` marks every operation `live`,
   `ui` (from the web UI's code) or `none`.
@@ -120,12 +121,28 @@ Read tools are annotated `readOnlyHint`; write tools are annotated `destructiveH
   diff and error unless you pass `reveal=true`. Account passwords are read from files, never from
   tool arguments.
 
-## Configuration
+## Tested routers
+
+| Router | Firmware | Protocol | Live-tested |
+|---|---|---|---|
+| Archer BE9300 | 1.2.4 | plain | full runbook (84 write types across both first routers), WPS, EasyMesh, USB, restore |
+| Archer BE4800 | 1.0.x | encrypted | runbook, MLO, advanced radio, USB, all reads |
+| Archer BE3600 v2 | 1.0.4 | encrypted | runbook, MLO (this model reboots after an MLO change), USB, HTTPS remote management, reboot, all reads |
+
+Other Archer BE models with the same web UI (Archer BE*xxxx*, firmware from 2024 on) should work.
+`router_catalog` shows which operations are confirmed live and which come from the web UI's code.
+
+## Install
 
 ```bash
-python -m venv venv && venv/bin/pip install -e ".[dev]"
-cp .env.example .env   # or pass the variables from your MCP client config
+pip install opus-tplink-mcp        # or: uvx opus-tplink-mcp
 ```
+
+From source: `python -m venv venv && venv/bin/pip install -e ".[dev]"`.
+
+## Configuration
+
+Copy `.env.example` to `.env`, or pass the variables from your MCP client config.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -142,8 +159,10 @@ cp .env.example .env   # or pass the variables from your MCP client config
 MCP client entry (stdio):
 
 ```json
-{"command": "/path/to/venv/bin/mcp-tplink-router", "env": {"TPLINK_HOST": "192.168.0.1", "TPLINK_PASSWORD": "..."}}
+{"command": "uvx", "args": ["opus-tplink-mcp"], "env": {"TPLINK_HOST": "192.168.0.1", "TPLINK_PASSWORD": "..."}}
 ```
+
+(or `"command": "/path/to/venv/bin/opus-tplink-mcp"` for a local install)
 
 ### Several routers
 
@@ -199,7 +218,11 @@ Found against a live BE9300 (fw 1.2.4); each one is encoded in the catalog or th
   write on a BE9300 once switched MLO off **and made the firmware drop an internal per-band field
   (`disabled_by`)**: Wi-Fi kept working, but every WPS start failed ("Interface return exception")
   until a config restore. After every Wi-Fi change the server now reads the WPS page as a health
-  check.
+  check. Some models (Archer BE3600) **reboot after an MLO change**, as their web UI warns. The
+  server reads the router's capability flags, flags the change as critical in the dry run, and
+  reports `router_rebooting` instead of probing a router that is going down.
+* **Connected clients** on encrypted-protocol firmware (BE4800, BE3600) are not in
+  `status?form=all`; they are read from the web UI's `loadDevice` source.
 * **User-permission switches** are accepted but ignored for a normal admin login (`no_effect`).
 * **Eco mode** takes `strong` / `medium` / `weak`; DST and the 24-hour clock use `dst_enable` /
   `hour24_enable`.
