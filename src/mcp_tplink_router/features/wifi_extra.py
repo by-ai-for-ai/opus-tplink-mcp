@@ -56,6 +56,8 @@ def wifi_extra(ctx: Ctx) -> Any:
             if action not in ENABLE_KEY:
                 raise UsageError(f"{action} has no single on/off; pass settings")
             settings.setdefault(ENABLE_KEY[action], ctx.args["enable"])
+        if action == "mlo" and settings:
+            return _mlo(ctx, settings)
         return settings_change(ctx, "wifi_extra", path, settings, what, critical=crit)
     # ------------------------------------------------------------------ WPS pairing
     if action in ("wps_push", "wps_client_pin", "wps_cancel"):
@@ -109,3 +111,38 @@ def wifi_extra(ctx: Ctx) -> Any:
         return plan
     raise UsageError(f"unknown action {action!r}")
 
+
+
+MLO_FIELDS = ("enable", "ssid", "hidden", "encryption", "psk_key", "psk_version", "selected_bands", "band_select")
+
+
+def _mlo(ctx: Ctx, settings: dict[str, Any]) -> Any:
+    """MLO writes exactly like the web UI: off = {enable: off}; on/changes = the 7 UI fields.
+
+    A malformed MLO write once made the firmware drop an internal per-band field (WPS then failed until
+    a config restore), so this never sends anything the UI doesn't.
+    """
+    path = "wireless?form=mlo_host"
+    cur = ctx.read(path)
+    bad = [k for k in settings if k not in MLO_FIELDS]
+    if bad:
+        raise UsageError(f"MLO accepts only {list(MLO_FIELDS)}; got {bad}")
+    full = {k: cur.get(k) for k in MLO_FIELDS if cur.get(k) is not None}
+    want = {**full, **{k: (("on" if v else "off") if isinstance(v, bool) else v) for k, v in settings.items()}}
+    if want.get("enable") == "on":
+        if not want.get("selected_bands"):
+            raise UsageError("MLO needs selected_bands (e.g. ['5g', '6g'])")
+        want["band_select"] = "on"  # live: re-enabling without band_select=on leaves MLO off
+    if all(forms.cmp_value(want.get(k)) == forms.cmp_value(full.get(k)) for k in want):
+        return {"status": "no_change", "current": cur}
+    restore = {**full, "band_select": "on"} if full.get("enable") == "on" else {"enable": "off"}
+    send = {"enable": "off"} if want.get("enable") == "off" else want
+    plan = ctx.plan("wifi_extra", "MLO network: " + ", ".join(f"{k}={'<secret>' if k == 'psk_key' else v}"
+                                                             for k, v in settings.items()), path)
+    plan.secret_fields = ("psk_key",)
+    plan.add(forms.plan_custom(path, "write", send, label="MLO", inverse={"op": "write", "fields": restore}))
+    plan.critical_reasons.append("MLO changes rebuild the Wi-Fi interfaces; MLO clients drop for ~30 s")
+    if want.get("enable") == "on" and full.get("enable") != "on":
+        plan.warnings.append("turning MLO ON from off worked live on a BE9300 but NOT on a BE4800 (the router "
+                             "accepts the write and stays off): if it stays off, switch it on from the web page")
+    return plan

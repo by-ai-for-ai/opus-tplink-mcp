@@ -307,7 +307,9 @@ def prepare(t: Any, step: Step) -> Prepared:
         return Prepared(step, {k: to_field(v) for k, v in step.fields.items()})
     if step.kind == "rsa_write":
         return Prepared(step, {f"{k}_from_file": v for k, v in step.fields["_rsa"].items()})
-    return Prepared(step, {k: to_field(v) if not isinstance(v, (dict, list)) else jdump(v)
+    lists = ep.list_fields if ep else ()
+    return Prepared(step, {k: ([str(x) for x in v] if k in lists and isinstance(v, list)
+                               else to_field(v) if not isinstance(v, (dict, list)) else jdump(v))
                            for k, v in step.fields.items()})
 
 

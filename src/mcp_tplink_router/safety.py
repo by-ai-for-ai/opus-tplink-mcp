@@ -392,9 +392,72 @@ def finalize(t: Any, plan: Plan, args: dict[str, Any], journal: Journal, reopen:
     refusal = gate(plan, args, allow_forbidden=allow_forbidden)
     if refusal:
         return {"applied": False, "refused": refusal, **desc}
+    pre_backup = _auto_backup(t, plan)
     result = apply_plan(t, plan, journal, reopen)
+    if pre_backup:
+        result["pre_change_backup"] = pre_backup
+    if any(s.url_path.startswith("wireless?") for s in plan.steps) and result.get("status") != "failed":
+        health = wifi_health(t)
+        result["wifi_health"] = health
+        if health.get("ok") is False:
+            result.setdefault("warnings_after", []).append(
+                "WI-FI CONFIG LOOKS DAMAGED after this change: " + str(health.get("problem")) + ". WPS and "
+                "pairing will fail. Restore the pre-change backup (maintenance action=restore file=...) "
+                + (f"({pre_backup.get('saved')})" if isinstance(pre_backup, dict) and pre_backup.get('saved') else
+                   "or a recent backup") + ", or re-save the setting from the router's web page.")
     return redact({"applied": result["status"] in ("applied", "partial", "collateral"), **result, **desc},
                   reveal, plan.secret_fields)
+
+
+def wifi_health(t: Any, *, tries: int = 4, wait: float = 10.0) -> dict[str, Any]:
+    """Cheap integrity probe after a Wi-Fi change.
+
+    Live lesson (BE9300 fw 1.2.4): a malformed MLO write made the firmware drop an internal per-band
+    field; Wi-Fi kept working but every WPS start failed and reading wireless?form=wps_pin crashed with
+    an HTTP 500 ("bad argument to 'lower'").  That read is the canary.  Timeouts right after a Wi-Fi
+    change are normal (the radios restart), so they are retried and never reported as damage.
+    """
+    last = ""
+    for attempt in range(tries):
+        try:
+            t.call("wireless?form=wps_pin", "read")
+            return {"ok": True} if attempt == 0 else {"ok": True, "note": f"answered after {attempt} retries"}
+        except RouterError as exc:
+            if exc.code == "no such callback":
+                return {"ok": True, "note": "this firmware has no wps_pin form; not checked"}
+            if exc.code == "server_error":
+                return {"ok": False, "problem": f"wireless?form=wps_pin crashes ({exc.message[:120]})"}
+            last = exc.code
+        if attempt + 1 < tries:
+            time.sleep(wait)
+    return {"ok": None, "note": f"could not check: wps_pin read kept failing ({last}); re-check in a minute"}
+
+
+def _auto_backup(t: Any, plan: Plan) -> dict[str, Any] | None:
+    """Save a config backup before a CRITICAL change (TPLINK_AUTO_BACKUP=0 turns it off)."""
+    import os
+
+    if plan.risk not in (CRITICAL, FORBIDDEN) or os.environ.get("TPLINK_AUTO_BACKUP", "1") == "0":
+        return None
+    if not hasattr(t, "download"):
+        return None
+    try:
+        from datetime import datetime
+        from pathlib import Path
+
+        data, _ = t.download("firmware?form=config_multipart", {"operation": "backup"})
+        if not data:
+            return {"error": "empty backup"}
+        base = os.environ.get("TPLINK_BACKUP_DIR") or os.path.join(
+            os.environ.get("TPLINK_JOURNAL_DIR") or os.path.expanduser("~/.local/state/mcp-tplink-router"),
+            "backups")
+        Path(base).mkdir(parents=True, exist_ok=True)
+        out = Path(base) / f"{plan.router}-auto-{datetime.now().strftime('%Y%m%d-%H%M%S')}.bin"
+        out.write_bytes(data)
+        os.chmod(out, 0o600)
+        return {"saved": str(out), "bytes": len(data)}
+    except Exception as exc:  # noqa: BLE001 - a backup failure must never block or break the change
+        return {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
 
 
 

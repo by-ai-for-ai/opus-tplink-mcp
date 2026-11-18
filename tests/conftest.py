@@ -33,6 +33,7 @@ def _no_network(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
         pass
     monkeypatch.setenv("TPLINK_JOURNAL_DIR", str(tmp_path / "journal"))
     monkeypatch.delenv("TPLINK_ALLOW_FORBIDDEN", raising=False)
+    monkeypatch.setenv("TPLINK_AUTO_BACKUP", "0")  # tests that check it turn it on
     monkeypatch.setenv("TPLINK_PASSWORD", "test-password-not-real")
     monkeypatch.setenv("TPLINK_HOST", "192.0.2.1")  # TEST-NET-1, never routable
 

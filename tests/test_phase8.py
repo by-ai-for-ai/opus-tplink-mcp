@@ -398,3 +398,32 @@ def test_blank_restore_kept_by_router_is_not_a_failure(apply: Any, call: Any, fa
     u = call("router_undo", id=out["journal_id"], apply=True, **({"confirm_token": d["confirm_token"]} if "confirm_token" in d else {}))
     assert u["verify"][0]["applied"] is True and u["verify"][0]["router_kept"] == {"ipaddr": "192.168.0.250"}
     assert fake.state["nat?form=dmz"]["enable"] == "off"
+
+
+def test_mlo_off_sends_only_enable_and_undo_restores_ui_fields(apply: Any, call: Any, fake: FakeTransport) -> None:
+    fake.state["wireless?form=mlo_host"] = {"enable": "on", "ssid": "Home", "hidden": "off", "encryption": "psk_sae",
+                                            "psk_key": "k-secret-1", "psk_version": "sae_only", "band_select": "on",
+                                            "selected_bands": ["5g", "6g"], "support": "on"}
+    out = apply("wifi_extra", action="mlo", enable=False)
+    w = [f for p, o, f in fake.calls if p == "wireless?form=mlo_host" and o == "write"]
+    assert w[-1] == {"enable": "off"}
+    d = call("router_undo", id=out["journal_id"])
+    call("router_undo", id=out["journal_id"], apply=True, **({"confirm_token": d["confirm_token"]} if "confirm_token" in d else {}))
+    w = [f for p, o, f in fake.calls if p == "wireless?form=mlo_host" and o == "write"][-1]
+    assert w["selected_bands"] == ["5g", "6g"] and w["band_select"] == "on" and w["enable"] == "on"
+    assert "support" in call("wifi_extra", action="mlo", settings={"support": "off"})["error"]
+
+
+def test_wifi_change_reports_health_and_auto_backup(apply: Any, fake: FakeTransport, tmp_path: Any,
+                                                    monkeypatch: Any) -> None:
+    monkeypatch.setenv("TPLINK_BACKUP_DIR", str(tmp_path / "bk"))
+    monkeypatch.setenv("TPLINK_AUTO_BACKUP", "1")
+    out = apply("wifi_extra", action="twt", enable=False)
+    assert out["wifi_health"]["ok"] is True
+    fake.custom[("wireless?form=wps_pin", "read")] = lambda f: (_ for _ in ()).throw(
+        __import__("mcp_tplink_router.transport", fromlist=["RouterError"]).RouterError(
+            "server_error", "bad argument #1 to 'lower'"))
+    out = apply("wifi_extra", action="twt", enable=True)
+    assert out["wifi_health"]["ok"] is False and any("DAMAGED" in w for w in out["warnings_after"])
+    crit = apply("internet", action="set", proto="dhcp", settings={"mtu": "1480"})
+    assert crit["pre_change_backup"]["bytes"] > 0

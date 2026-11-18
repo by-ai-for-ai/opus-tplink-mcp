@@ -99,6 +99,11 @@ Read tools are annotated `readOnlyHint`; write tools are annotated `destructiveH
   are not sent, and `router_undo` can re-add the lost rows.
 * **Verification:** after a write the router is re-read, and the result is `applied`, a `mismatch`,
   or `no_effect` (accepted but ignored).
+* **Automatic backup:** before every critical change the router's config is downloaded to the backup
+  folder (`pre_change_backup` in the result; `TPLINK_AUTO_BACKUP=0` turns it off).
+* **Wi-Fi health check:** after every Wi-Fi change the server re-reads the WPS PIN page, the read
+  that crashes when the band configuration is damaged. Transient timeouts while radios restart are
+  retried; a crash is reported loudly in `warnings_after` with the restore instructions.
 * **Validation:** DHCP pools, reservations, bindings and routes are checked against the subnet, the
   router's own IP, leases and conflicts. A **randomised/private MAC** gets a warning.
 * **Journal:** `~/.local/state/mcp-tplink-router/journal.jsonl` (directory 0700, file 0600). The full
@@ -126,6 +131,7 @@ cp .env.example .env   # or pass the variables from your MCP client config
 | `TPLINK_JOURNAL_DIR` | `~/.local/state/mcp-tplink-router` | Journal (also the default parent of backups and device logs) |
 | `TPLINK_BACKUP_DIR` | `<journal>/backups` | Where `maintenance action=backup` saves config files (mode 600) |
 | `TPLINK_DEVICE_LOG_DIR` | `<journal>/device-logs` | Per-MAC histories written by `device_log action=record` |
+| `TPLINK_AUTO_BACKUP` | `1` | Download a config backup before every critical change (`0` = off) |
 | `TPLINK_PROTECTED_MACS` | | Comma-separated MACs whose VPN-client routing must not break silently (e.g. a filtered child's laptop). Changes affecting them are called out by name. |
 | `TPLINK_ALLOW_FORBIDDEN` | unset | `1` lets `router_raw_write` send forbidden-tier operations |
 
@@ -182,8 +188,11 @@ Found against a live BE9300 (fw 1.2.4); each one is encoded in the catalog or th
   Anything allowlisting your old IP (cloud firewalls, DNS-filter locations) will need updating.
 * **Admin password** fields are RSA-encrypted with per-field keys from the read. The server
   encrypts at send time, so the dry run's confirm token stays valid.
-* **MLO network:** `selected_bands` must be sent with every write. A write without it switched
-  the MLO network off.
+* **MLO network:** off = only `enable=off`. On = the web UI's fields plus `selected_bands` (repeated)
+  and `band_select=on`. A malformed MLO write switched MLO off **and made the firmware drop an
+  internal per-band field (`disabled_by`)**: Wi-Fi kept working, but every WPS start failed
+  ("Interface return exception") until a config restore. Turning MLO back on from off worked on a
+  BE9300 but not on a BE4800 (use the web page there).
 * **User-permission switches** are accepted but ignored for a normal admin login (`no_effect`).
 * **Eco mode** takes `strong` / `medium` / `weak`; DST and the 24-hour clock use `dst_enable` /
   `hour24_enable`.
