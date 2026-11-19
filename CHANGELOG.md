@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.0 (2026-11-19)
+
+### Added
+- **TP-Link RE range extenders** (experimental): two new login generations taken from the extenders'
+  own web pages - `extender` (X-series: RSA-1024 login, `Referer` on every request) and
+  `encrypted-v2` (the hardened generation: SHA-256 login hash, RSA-OAEP login signature, HMAC-SHA256
+  signature over each request's ciphertext). Tested live on RE2700X, RE1750X, RE1500X and RE3200BE in
+  repeater mode.
+- Tools `extender` (status, uplink, extended and guest networks, mesh, network, clients, advanced Wi-Fi,
+  system, logs) and `extender_set` (LEDs, LED night mode, power schedule, reboot), each change applied,
+  verified and undone live on all four (reboot on the RE1500X).
+- Device kinds (`TPLINK_<NAME>_KIND=router|extender`): router-only tools answer "not supported" on an
+  extender with the list of tools that work there.
+- **Operation mode switched live** (Archer BE3600: router -> AP -> router, both directions, with the
+  tool). The dry run explains how the device will be reached afterwards. Leaving router mode makes the
+  firmware turn remote management off; `keep_access=true` turns it on before switching back to router
+  mode (opt-in: it exposes the admin page on the WAN side).
+
+### Fixed
+- A mode switch was reported as `no_effect`: the device accepts it, still reads the old mode, and
+  switches about 15 s later. The operation-mode form (and an undo of it) now reports `verify_deferred`;
+  every other write keeps the strict check.
+- An unreachable device (restarting, or a changed address) no longer gets the misleading "one admin
+  login at a time" hint; the hint now says it did not answer at its configured address.
+- A refused extender login is never retried (the devices lock the account after failures).
+
 ## 1.0.2 (2026-11-18)
 
 ### Added

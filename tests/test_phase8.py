@@ -464,3 +464,65 @@ def test_mlo_change_on_a_rebooting_model_reports_the_reboot(apply: Any, call: An
     out = apply("wifi_extra", action="mlo", enable=True)
     assert out["router_rebooting"] and out["wifi_health"]["ok"] is None
     assert not any(p == "wireless?form=wps_pin" for p, _, _ in fake.calls[n:])  # no health probe on a rebooting router
+
+
+def test_operation_mode_switch_is_not_reported_as_ignored(apply: Any, fake: FakeTransport) -> None:
+    # Live (BE3600): the router accepts sysmode, still reads the old mode, and switches ~15 s later.
+    fake.state["system?form=sysmode"] = {"support": "yes", "mode": "ap"}
+    fake.ignore_changes.add("system?form=sysmode")
+    out = apply("maintenance", action="operation_mode", mode="router")
+    assert out["status"] == "applied" and out["verify_deferred"] and out["router_rebooting"]
+    assert out["verify"][-1]["applied"] is None and "deferred" in out["verify"][-1]
+    assert "no_effect" not in out and "NO EFFECT" not in str(out.get("warning"))
+
+
+def test_switch_to_router_mode_keep_access_is_opt_in(call: Any, apply: Any, fake: FakeTransport) -> None:
+    # Live (BE3600): leaving router mode turns remote management off; going back keeps whatever it is set to.
+    fake.state["system?form=sysmode"] = {"support": "yes", "mode": "ap"}
+    fake.state["administration?form=remote"] = {"enable": "off", "enable_superadmin": "off", "http_port": "80",
+                                                "https_port": "443", "managers": "all", "web_address": ""}
+    dry = call("maintenance", action="operation_mode", mode="router")
+    assert [d["path"] for d in dry["diff"]] == ["system?form=sysmode"]  # default: remote management untouched
+    assert any("keep_access=true" in w for w in dry["warnings"])
+    opt = call("maintenance", action="operation_mode", mode="router", keep_access=True)
+    assert [d["path"] for d in opt["diff"]] == ["administration?form=remote", "system?form=sysmode"]
+    assert any("INTERNET" in r for r in opt["critical_because"])
+    fake.ignore_changes.add("system?form=sysmode")  # the switch happens ~15 s later, after the re-read
+    out = apply("maintenance", action="operation_mode", mode="router", keep_access=True)
+    assert out["status"] == "applied" and out["verify"][0]["applied"] is True and out["verify_deferred"]
+    assert fake.state["administration?form=remote"]["enable"] == "on"
+
+
+def test_ignored_write_in_a_rebooting_plan_is_still_no_effect(fake: FakeTransport, tmp_path: Any) -> None:
+    # The deferred check is keyed on the operation-mode form only: plan.reboots (set e.g. for MLO on a
+    # BE3600) must not turn a silently ignored write into "applied".
+    from contextlib import nullcontext
+
+    from mcp_tplink_router import forms
+    from mcp_tplink_router.journal import Journal
+    from mcp_tplink_router.safety import Plan, apply_plan
+    from mcp_tplink_router.transport import session
+
+    fake.ignore_changes.add("upnp?form=enable")
+    plan = Plan(tool="t", summary="s", reboots="the router reboots")
+    with session(lambda: fake) as t:
+        plan.add(forms.plan_write("upnp?form=enable", forms.read_form(t, "upnp?form=enable"), {"enable": "off"}))
+        out = apply_plan(t, plan, Journal(tmp_path / "j"), lambda: nullcontext(t))
+    assert out["status"] == "no_effect" and "verify_deferred" not in out
+
+
+def test_undoing_a_mode_switch_is_also_checked_after_restart(apply: Any, fake: FakeTransport) -> None:
+    fake.state["system?form=sysmode"] = {"support": "yes", "mode": "router"}
+    first = apply("maintenance", action="operation_mode", mode="ap")
+    assert first["status"] == "applied"
+    fake.ignore_changes.add("system?form=sysmode")
+    undo = apply("router_undo", id=first["journal_id"])
+    assert undo["status"] == "applied" and undo["verify_deferred"]
+
+
+def test_leaving_router_mode_warns_about_remote_management(call: Any, fake: FakeTransport) -> None:
+    fake.state["system?form=sysmode"] = {"support": "yes", "mode": "router"}
+    dry = call("maintenance", action="operation_mode", mode="ap")
+    assert [d["path"] for d in dry["diff"]] == ["system?form=sysmode"]
+    assert any("turns remote management off" in w for w in dry["warnings"])
+    assert call("maintenance", action="operation_mode", mode="router")["status"] == "no_change"

@@ -43,6 +43,7 @@ class Ctx:
     identity: Callable[[], dict[str, Any]] = field(default=lambda: {"ip": None, "macs": []})
     router: str = "main"
     routers: list[dict[str, str]] = field(default_factory=list)
+    kind: str = "router"
     _cache: dict[str, Any] = field(default_factory=dict)
 
     # -- arguments ---------------------------------------------------------------------

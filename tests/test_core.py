@@ -193,7 +193,7 @@ def test_tool_annotations() -> None:
     defs = {t.name: t for t in tool_definitions()}
     assert defs["router_status"].annotations.readOnlyHint is True
     assert defs["dhcp_reservation"].annotations.destructiveHint is True
-    assert len(defs) <= 32
+    assert len(defs) <= 34  # compact tool list; extenders add a read-only + a write tool
 
 
 def test_raw_read_refuses_forbidden_forms(call, fake) -> None:  # type: ignore[no-untyped-def]
@@ -202,3 +202,15 @@ def test_raw_read_refuses_forbidden_forms(call, fake) -> None:  # type: ignore[n
         out = call("router_raw_read", path=path, operation=op)
         assert "error" in out, (path, out)
     assert fake.calls == []
+
+
+def test_unreachable_device_gets_an_address_hint_not_the_one_session_hint() -> None:
+    from mcp_tplink_router.journal import Journal
+    from mcp_tplink_router.tools import Runtime, run_tool
+    from mcp_tplink_router.transport import RouterError
+
+    def down() -> None:
+        raise RouterError("login_failed", "HTTPSConnectionPool(host='192.0.2.9', port=443): Max retries exceeded "
+                                          "(Caused by ConnectTimeoutError(... 'Connection to 192.0.2.9 timed out.'))")
+    out = run_tool("router_status", {}, Runtime(factory=down, journal=Journal(), retry_delay=0))
+    assert out["error"] == "login_failed" and "did not answer" in out["hint"] and "ONE admin" not in out["hint"]

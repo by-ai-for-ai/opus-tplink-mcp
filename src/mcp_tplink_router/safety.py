@@ -190,6 +190,10 @@ class Plan:
         return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 
+# Forms the device accepts at once but applies only while restarting its network (verified live on a BE3600).
+APPLIES_ON_RESTART = frozenset({"system?form=sysmode"})
+
+
 def make_token(plan: Plan, now: float | None = None) -> str:
     exp = int((now if now is not None else time.time()) + TOKEN_TTL)
     mac = hmac.new(_TOKEN_KEY, f"{exp}:{plan.digest()}".encode(), hashlib.sha256).hexdigest()[:32]
@@ -326,6 +330,12 @@ def apply_plan(t: Any, plan: Plan, journal: Journal, reopen: Reopen) -> dict[str
                     "error": f"{exc.code} while sending step {i + 1}; re-read says applied={applied}",
                     "note": "the write was NOT resent; remaining steps were not sent"}
         checks.append({"step": i + 1, **forms.verify(t, step, reply)})
+        if checks[-1].get("no_effect") and step.path in APPLIES_ON_RESTART:
+            # The device applies this while restarting (operation mode): an immediate re-read still shows
+            # the old value.  That is not "ignored"; the check has to wait until it is back.  Keyed on the
+            # form, not on plan.reboots: a rebooting model must still report an ignored MLO write.
+            checks[-1] = {"step": i + 1, "applied": None,
+                          "deferred": "takes effect as the device restarts; re-read once it is back"}
         if checks[-1].get("no_effect"):
             after = _affected_state(t, plan)
             msg = (f"NO EFFECT: the router accepted step {i + 1} ({step.kind} {step.path}) but nothing changed - "
@@ -353,6 +363,8 @@ def apply_plan(t: Any, plan: Plan, journal: Journal, reopen: Reopen) -> dict[str
                            "verify": checks}
     if unverified:
         out["warning"] = "the router accepted every request but a re-read does not show all changes"
+    if any(c.get("deferred") for c in checks):
+        out["verify_deferred"] = True
     return out
 
 

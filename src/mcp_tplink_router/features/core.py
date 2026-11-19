@@ -29,6 +29,10 @@ def _try(fn: Any, *a: Any) -> Any:
 
 
 def router_status(ctx: Ctx) -> dict[str, Any]:
+    if ctx.kind == "extender":
+        from .extender import extender_status
+
+        return extender_status(ctx)
     try:
         st = ctx.read("status?form=all")
     except RouterError as exc:
@@ -158,6 +162,16 @@ def _fields_arg(ctx: Ctx) -> dict[str, str]:
 def router_raw_read(ctx: Ctx) -> dict[str, Any]:
     path = str(ctx.need("path")).lstrip("/").removeprefix("admin/")
     op = str(ctx.arg("operation", "read"))
+    if ctx.kind == "extender":
+        from .extender import EXTENDER_FORMS
+
+        if path not in EXTENDER_FORMS:
+            raise UsageError(f"{path!r} is not a catalogued extender form; known: {sorted(EXTENDER_FORMS)}")
+        if op != EXTENDER_FORMS[path][0]:
+            raise UsageError(f"{path} is read with operation={EXTENDER_FORMS[path][0]!r}")
+        data = ctx.t.call(path, op, _fields_arg(ctx))
+        return {"path": path, "operation": op,
+                "data": redact(data, bool(ctx.arg("reveal")), EXTENDER_FORMS[path][2])}
     for single in catalog.split_forms(path):
         if catalog.get(single) is None:
             raise UsageError(f"{single!r} is not a form the router UI uses (see router_catalog)")

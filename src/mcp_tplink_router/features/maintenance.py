@@ -106,9 +106,7 @@ def maintenance(ctx: Ctx) -> Any:
             return {"operation_mode": ctx.read("system?form=sysmode"), "modes": list(MODES)}
         if mode not in MODES:
             raise UsageError(f"mode must be one of {list(MODES)}")
-        return settings_change(ctx, "maintenance", "system?form=sysmode", {"mode": mode}, "operation mode",
-                               critical="switching operation mode rebuilds the network (DHCP, Wi-Fi, NAT); "
-                                        "the router's address may change and it reboots")
+        return _operation_mode(ctx, mode)
     if action == "reboot_schedule":
         return settings_change(ctx, "maintenance", "reboot?form=set", ctx.obj("settings"), "reboot schedule")
     raise UsageError(f"unknown action {action!r}")
@@ -137,3 +135,49 @@ def _diag(ctx: Ctx, kind: str) -> dict[str, Any]:
     finished = str(res.get("finish")) == "1"
     final = ctx.t.call(path, "stop", base) or res
     return {"target": target, "finished": finished, "result": final.get("result") or res.get("result", "")}
+
+
+REMOTE = "administration?form=remote"
+
+
+def _operation_mode(ctx: Ctx, mode: str) -> Any:
+    """Switch operation mode, saying plainly how the device will be reached afterwards.
+
+    Live (Archer BE3600): the firmware turns remote management OFF when it leaves router mode, and keeps
+    whatever remote management is set to when it goes back to router mode.  In router mode the device
+    is reached on its LAN side, or on its WAN side only with remote management on.  ``keep_access=true``
+    turns remote management on first; it is opt-in because on a typical setup the WAN side is the
+    internet, and the firmware ignores a restriction to one manager address (it keeps "all").
+    """
+    path = "system?form=sysmode"
+    cur = ctx.read(path)
+    old = str(cur.get("mode") or "")
+    if old == mode:
+        return {"status": "no_change", "current": cur}
+    plan = ctx.plan("maintenance", f"switch operation mode {old or '?'} -> {mode}", path, REMOTE)
+    plan.critical_reasons.append("switching operation mode rebuilds the network (DHCP, Wi-Fi, NAT); the device's "
+                                 "address changes and it restarts its network")
+    keep = ctx.arg("keep_access") is True
+    remote = safe_read(ctx, REMOTE)
+    remote_ok = isinstance(remote, dict) and "error" not in remote and "unavailable" not in remote
+    remote_on = remote_ok and str(remote.get("enable")).lower() == "on"
+    if mode == "router":
+        if keep and remote_ok and not remote_on:
+            plan.add(forms.plan_write(REMOTE, remote, {"enable": "on"}, label="keep remote management"))
+            plan.critical_reasons.append("keep_access turns remote management ON: the admin page becomes reachable "
+                                         "on the WAN side - the INTERNET if the WAN is your ISP connection (managers: "
+                                         + str(remote.get("managers")) + ")")
+        elif not remote_on:
+            plan.warnings.append("remote management is off, so after the switch the admin page (and this server) can "
+                                 "only reach the device from its LAN ports or Wi-Fi. If this server sits on the "
+                                 "upstream network, pass keep_access=true (exposes the admin page on the WAN side)")
+        plan.warnings.append("in router mode its WAN side takes a NEW address from the upstream network (DHCP); "
+                             "update this server's host for it")
+    elif old == "router":
+        plan.warnings.append(f"the firmware turns remote management off in {mode} mode; the device then takes an "
+                             "address on the upstream network by DHCP (a BE3600 answers briefly on the upstream "
+                             "subnet's .254 first); update this server's host for it")
+    plan.add(forms.plan_write(path, cur, {"mode": mode}, label="operation mode"))
+    plan.reboots = ("the device switches mode about 15 s after accepting this and restarts its network "
+                    "(a few minutes); the mode is re-checked only once it is back")
+    return plan

@@ -7,7 +7,13 @@ from __future__ import annotations
 
 from typing import Any
 
-__version__ = "0.2.0"
+try:
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("opus-tplink-mcp")
+except PackageNotFoundError:  # running from a source tree without an install
+    __version__ = "0.0.0+source"
 
 
 def main() -> None:

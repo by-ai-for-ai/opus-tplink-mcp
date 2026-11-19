@@ -1,7 +1,13 @@
 # opus-tplink-mcp
 
-**A complete, safety-first MCP server for TP-Link Archer routers (Wi-Fi 7 / BE series).**
-31 tools covering virtually everything the router's web UI can do. Every change goes through
+### Built by AI, for AI.
+
+An AI wrote it (reverse-engineering the routers' own web pages, testing every write live), and an
+AI is who it's for: an agent that can change a home network safely, see exactly what it is about
+to do, prove that it worked, and undo it.
+
+**A complete, safety-first MCP server for TP-Link Archer routers (Wi-Fi 7 / BE series) and RE range extenders.**
+33 tools covering virtually everything the router's web UI can do. Every change goes through
 the same pipeline: **dry run → review → apply → verify → journal → undo**.
 
 > Designed and re-engineered by **Claude Opus 5.5** (Anthropic), with **Fable 5.2** advising,
@@ -32,7 +38,7 @@ the same pipeline: **dry run → review → apply → verify → journal → und
 * **Multi-router.** Manage several routers from one server, including older firmware that uses the
   encrypted LuCI protocol (e.g. Archer BE4800 1.0.x).
 
-## Tools (31)
+## Tools (33)
 
 | Area | Tool | Highlights |
 |---|---|---|
@@ -60,8 +66,11 @@ the same pipeline: **dry run → review → apply → verify → journal → und
 | Maintenance | `maintenance` | **Config backup and restore**, firmware (online, image upload, mesh satellites), **ping / traceroute**, operation mode, reboot schedule |
 | Admin | `admin` | Admin password (RSA-encrypted like the web UI), remote management, HTTPS, local-management list, recovery e-mail, user permissions |
 | System | `system` | **SPI firewall / ping replies**, LEDs, eco mode, time/NTP/DST, auto-update, QoS, device priority, reboot |
+| Extenders | `extender` / `extender_set` | RE range extenders: model, mode, uplink signal, mesh role, extended and guest networks, clients, logs; LEDs, LED night mode, power schedule, reboot |
 
-Read tools are annotated `readOnlyHint`; write tools are annotated `destructiveHint`.
+Read tools are annotated `readOnlyHint`; write tools are annotated `destructiveHint`. On an extender
+(`KIND=extender`) only `extender`, `extender_set`, `router_status`, `router_raw_read`, `router_journal`
+and `router_undo` are offered; the router tools answer "not supported" with the list.
 
 ## How it talks to the router
 
@@ -80,6 +89,19 @@ Read tools are annotated `readOnlyHint`; write tools are annotated `destructiveH
 * **Retries:** a failed login, or an ambiguous error while *reading or planning*, is retried once. A
   write is **never resent**. If a write times out or the connection drops, the server logs in
   again, re-reads, and reports whether the change was applied.
+
+### Range extenders
+
+Two more login generations, both taken from the extenders' own web pages:
+
+* **`extender`** (X-series, e.g. RE2700X / RE1750X / RE1500X): plain form posts like the BE9300;
+  the password is RSA-1024 PKCS#1 v1.5 encrypted. Every request needs a `Referer` header.
+* **`encrypted-v2`** (the hardened generation, e.g. RE3200BE firmware 1.5): AES bodies, a SHA-256
+  login hash, an RSA-OAEP login signature, and an HMAC-SHA256 signature over each request's
+  ciphertext. Without the per-request hash the device answers HTTP 403.
+
+A refused extender login is never retried automatically: these devices lock the account after
+repeated failures.
 
 ## Safety model
 
@@ -127,9 +149,21 @@ Read tools are annotated `readOnlyHint`; write tools are annotated `destructiveH
 |---|---|---|---|
 | Archer BE9300 | 1.2.4 | plain | full runbook (84 write types across both first routers), WPS, EasyMesh, USB, restore |
 | Archer BE4800 | 1.0.x | encrypted | runbook, MLO, advanced radio, USB, all reads |
-| Archer BE3600 v2 | 1.0.4 | encrypted | runbook, MLO (this model reboots after an MLO change), USB, HTTPS remote management, reboot, all reads |
+| Archer BE3600 v2 | 1.0.4 | encrypted | runbook, MLO (this model reboots after an MLO change), operation mode router ↔ AP, USB, HTTPS remote management, reboot, all reads |
 
 Other Archer BE models with the same web UI (Archer BE*xxxx*, firmware from 2024 on) should work.
+
+## Tested range extenders
+
+All four were tested in repeater mode as EasyMesh members of a BE9300.
+
+| Extender | Firmware | Protocol | Reads | Changes (applied, verified, undone) |
+|---|---|---|---|---|
+| RE2700X v1.0 | 1.1.9 | extender | status, uplink, networks, mesh, clients, system, logs | LEDs, LED night mode, power schedule |
+| RE1750X v2.2 | 1.0.6 | extender | same | LEDs, LED night mode, power schedule |
+| RE1500X v2.0 | 1.1.0 | extender | same | LEDs, LED night mode, power schedule, reboot |
+| RE3200BE | 1.5.3 | encrypted-v2 | same | LEDs, LED night mode, power schedule |
+
 `router_catalog` shows which operations are confirmed live and which come from the web UI's code.
 
 ## Install
@@ -173,6 +207,17 @@ TPLINK_ROUTERS=upstairs
 TPLINK_UPSTAIRS_HOST=https://192.168.1.1
 TPLINK_UPSTAIRS_PASSWORD_FILE=/path/to/router2.pw
 TPLINK_UPSTAIRS_PROTOCOL=encrypted   # older firmware (e.g. BE4800 1.0.x): encrypted LuCI
+```
+
+A range extender is added the same way, with its protocol (the kind follows from `extender`;
+set it for `encrypted-v2`):
+
+```
+TPLINK_ROUTERS=hallway
+TPLINK_HALLWAY_HOST=192.168.0.20
+TPLINK_HALLWAY_PASSWORD_FILE=/path/to/extender.pw
+TPLINK_HALLWAY_PROTOCOL=encrypted-v2   # or: extender (X-series)
+TPLINK_HALLWAY_KIND=extender
 ```
 
 * Every tool takes `router` (default `main`). `router_status` lists the configured routers.
@@ -236,15 +281,24 @@ Found against a live BE9300 (fw 1.2.4); each one is encoded in the catalog or th
 * `mesh action=pair` is **disabled**. In testing, starting the satellite search and a WPS session in
   the same login locked a BE9300 up badly enough that a factory reset was needed. Pair satellites
   with the router's WPS button, `wifi_extra action=wps_push`, or the web UI.
-* `maintenance action=operation_mode` (router ↔ AP/repeater) is implemented but was not switched
-  live. With the router connected straight to an ISP box, AP mode can leave it unreachable.
+* `maintenance action=operation_mode` was switched live router → AP → router on a BE3600. The
+  device changes address with the mode (in AP mode it takes a DHCP lease on the upstream network;
+  in router mode it is reached on its LAN side, or on its WAN address with remote management on),
+  so point this server's host at the new address afterwards. Leaving router mode turns remote
+  management off. `keep_access=true` turns it on before switching back to router mode; it is
+  opt-in because it exposes the admin page on the WAN side (the internet, if the WAN is your ISP),
+  and the firmware ignores a restriction to one manager address.
+* **Extenders:** tested in repeater mode only (access-point mode needs a wired uplink and is
+  untested). Writing the extended networks or high-speed mode is not offered yet (not verified;
+  high-speed mode is ignored by the firmware while the extender is in an EasyMesh network). An
+  EasyMesh member takes its Wi-Fi settings from the main router, so local Wi-Fi changes may be
+  overwritten. File upload/download (backup, firmware) is not implemented for extenders.
 * `usb action=eject` is accepted by the router, but in testing the partitions kept reading as
   mounted until the drive was unplugged, so treat it as "safe to unplug" only after checking.
 * **Not yet exercised live** (implemented from the web UI's code, covered by offline tests):
   firmware image upload and online update (no newer firmware was available), Time Machine, DDNS
   login, WPS client-PIN pairing, mesh satellite operations, adding WireGuard server
-  accounts (the router refuses the format tried so far), parental-control profile edits and
-  operation mode. Operations marked `ui` or `none` in
+  accounts (the router refuses the format tried so far) and parental-control profile edits. Operations marked `ui` or `none` in
   `router_catalog` fall in this group.
 
 ## Development

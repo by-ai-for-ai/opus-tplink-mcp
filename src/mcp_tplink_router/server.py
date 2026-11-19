@@ -14,6 +14,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool, ToolAnnotations
 
 from .config import load_routers
+from .extender_transport import ExtenderTransport, HardenedTransport
 from .journal import Journal
 from .safety import detect_own_identity
 from .tools import TOOLS, Registry, Runtime, run_tool
@@ -42,11 +43,18 @@ def registry_from_env() -> Registry:
         if cfg.protocol == "encrypted":
             def factory(cfg=cfg, getter=getter) -> Any:  # noqa: ANN001
                 return EncryptedRouterTransport(cfg.host, getter, timeout=cfg.timeout)
+        elif cfg.protocol == "extender":
+            def factory(cfg=cfg, getter=getter) -> Any:  # noqa: ANN001
+                return ExtenderTransport(cfg.host, getter, timeout=cfg.timeout)
+        elif cfg.protocol == "encrypted-v2":
+            def factory(cfg=cfg, getter=getter) -> Any:  # noqa: ANN001
+                return HardenedTransport(cfg.host, getter, timeout=cfg.timeout)
         else:
             def factory(cfg=cfg, getter=getter) -> Any:  # noqa: ANN001
                 return RouterTransport(cfg.host, getter(), timeout=cfg.timeout)
         host = cfg.host
         routers[name] = Runtime(factory=factory, journal=journal, host=host, name=name, protocol=cfg.protocol,
+                                kind=cfg.kind,
                                 identity=(lambda h=host: detect_own_identity(h)))
     return Registry(routers)
 

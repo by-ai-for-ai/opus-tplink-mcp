@@ -43,6 +43,7 @@ class ToolDef:
     properties: dict[str, Any] = field(default_factory=dict)
     required: list[str] = field(default_factory=list)
     read_only: bool = False
+    kinds: tuple[str, ...] = ("router",)  # device kinds this tool supports
 
     def schema(self) -> dict[str, Any]:
         props = dict(self.properties)
@@ -69,6 +70,7 @@ class Runtime:
     retry_delay: float = 2.0
     name: str = "main"
     protocol: str = "plain"
+    kind: str = "router"
 
     @property
     def profile(self) -> str:
@@ -90,7 +92,7 @@ class Registry:
         return self.routers[name]
 
     def describe(self) -> list[dict[str, str]]:
-        return [{"name": n, "host": r.host, "protocol": r.protocol} for n, r in self.routers.items()]
+        return [{"name": n, "host": r.host, "protocol": r.protocol, "kind": r.kind} for n, r in self.routers.items()]
 
 
 NO_CALLBACK_HINT = ("router {r!r} does not have this form/operation - its firmware differs from the BE9300 "
@@ -126,11 +128,15 @@ def run_tool(name: str, args: dict[str, Any] | None, reg: Registry | Runtime) ->
         rt = reg.get(router or "main")
     except UsageError as exc:
         return {"error": str(exc)}
+    if rt.kind not in tool.kinds:
+        usable = sorted(n for n, t in TOOLS.items() if rt.kind in t.kinds)
+        return {"error": f"{name} is not supported on {rt.name!r} ({rt.kind})", "tools_for_this_device": usable}
     last: RouterError | None = None
     for attempt in (1, 2):
         try:
             with session(rt.factory) as t:
-                ctx = Ctx(t, args, rt.journal, rt.host, rt.identity, router=rt.name, routers=reg.describe())
+                ctx = Ctx(t, args, rt.journal, rt.host, rt.identity, router=rt.name, routers=reg.describe(),
+                          kind=rt.kind)
                 result = tool.handler(ctx)
                 if isinstance(result, Plan):
                     if tool.read_only:  # pragma: no cover - programming error
@@ -151,14 +157,19 @@ def run_tool(name: str, args: dict[str, Any] | None, reg: Registry | Runtime) ->
             return {"error": f"conflict: {exc}"}
         except RouterError as exc:
             last = exc
-            if attempt == 1 and (exc.code == E_LOGIN or exc.ambiguous):
+            if attempt == 1 and (exc.code == E_LOGIN or exc.ambiguous) and not getattr(exc, "no_retry", False):
                 logger.warning("%s attempt 1 failed (%s); retrying with a fresh login", name, exc.code)
                 time.sleep(rt.retry_delay)
                 continue
             break
     assert last is not None
     out: dict[str, Any] = {"error": last.code, "message": redact(last.message), "router": rt.name}
-    if last.code == E_LOGIN or last.ambiguous:
+    unreachable = any(s in last.message for s in ("timed out", "ConnectTimeout", "Max retries exceeded",
+                                                   "Connection refused", "No route to host"))
+    if unreachable:
+        out["hint"] = (f"{rt.name} did not answer at its configured address: it may be restarting, or its address "
+                       "changed (e.g. after an operation mode switch); check the host setting for this device.")
+    elif last.code == E_LOGIN or last.ambiguous:
         out["hint"] = ONE_SESSION_HINT
     elif last.code == "no such callback":
         out["hint"] = NO_CALLBACK_HINT.format(r=rt.name)
@@ -181,8 +192,8 @@ def _register_all() -> None:
     register(ToolDef(
         "router_status",
         "Router overview: WAN/LAN addresses, internet state, Wi-Fi bands, client counts, CPU/memory, "
-        "firmware, VPN-client switch. Read-only.",
-        core.router_status, read_only=True))
+        "firmware, VPN-client switch. On an extender: model, mode, uplink, mesh role. Read-only.",
+        core.router_status, read_only=True, kinds=("router", "extender")))
     register(ToolDef(
         "router_get",
         "Read one section of the router config by friendly name (e.g. dhcp, dhcp_reservations, dhcp_leases, "
@@ -202,7 +213,7 @@ def _register_all() -> None:
         core.router_raw_read,
         {"path": {"type": "string"}, "operation": {"type": "string", "default": "read"},
          "fields": {"type": "object", "description": "extra request fields (strings; objects are JSON-encoded)"}},
-        required=["path"], read_only=True))
+        required=["path"], read_only=True, kinds=("router", "extender")))
     register(ToolDef(
         "router_logs",
         "Read the router's system log (newest first when timestamps parse). Filters: level (minimum severity, "
@@ -217,14 +228,14 @@ def _register_all() -> None:
         "before/after and requests). Use the id with router_undo.",
         core.router_journal,
         {"action": _action(["list", "show"], "list"), "id": {"type": "string"},
-         "limit": {"type": "integer", "default": 20}}, read_only=True))
+         "limit": {"type": "integer", "default": 20}}, read_only=True, kinds=("router", "extender")))
     register(ToolDef(
         "router_undo",
         "Reverse a journaled change (writes restore old values, inserts are removed, removes re-added, updates "
         "swapped back). Refuses if the router changed since, unless force=true. Reboots/firmware/actions are "
         "not undoable. Dry run first like every write.",
         core.router_undo, {"id": {"type": "string"}, "force": {"type": "boolean", "default": False}},
-        required=["id"]))
+        required=["id"], kinds=("router", "extender")))
     register(ToolDef(
         "router_raw_write",
         "Escape hatch: send ANY operation + fields to a catalogued form. Risk comes from the catalog (unknown "
@@ -450,7 +461,7 @@ def _register_phase8() -> None:
         "(file = a backup name or path; CRITICAL, reboots) | firmware_check (router + mesh satellites, online) | "
         "firmware_update_online (CRITICAL, reboots) | firmware_status | firmware_upload (file = image path; "
         "CRITICAL) | satellite_firmware_update (mac) | ping / traceroute (target, count, size, max_hops, timeout) | "
-        "operation_mode (mode=router|ap|repeater|client|multissid; none = read; CRITICAL) | reboot_schedule "
+        "operation_mode (mode=router|ap|repeater|client|multissid; none = read; CRITICAL; keep_access) | reboot_schedule "
         "(settings). Factory reset is deliberately only reachable via router_raw_write (forbidden tier).",
         maintenance.maintenance,
         {"action": _action(["info", "backup", "backups", "restore", "firmware_check", "firmware_update_online",
@@ -458,7 +469,10 @@ def _register_phase8() -> None:
                             "operation_mode", "reboot_schedule"], "info"),
          "file": {"type": "string"}, "mac": {"type": "string"}, "target": {"type": "string"},
          "count": {"type": "integer"}, "size": {"type": "integer"}, "max_hops": {"type": "integer"},
-         "timeout": {"type": "integer"}, "mode": _action(list(maintenance.MODES)), "settings": settings}))
+         "timeout": {"type": "integer"}, "mode": _action(list(maintenance.MODES)), "settings": settings,
+         "keep_access": {"type": "boolean", "default": False, "description": "operation_mode to router: turn remote "
+                         "management on first so this server can reach the device on its WAN side (exposes the "
+                         "admin page there - the internet if the WAN is your ISP)"}}))
     register(ToolDef(
         "admin",
         "Router administration. action=status | change_password (old_password_file, new_password_file; "
@@ -531,5 +545,29 @@ def _register_phase8() -> None:
          "username": {"type": "string"}, "password_file": {"type": "string"}, "wan_bind": {"type": "string"}}))
 
 
+def _register_extender() -> None:
+    from .features import extender
+
+    register(ToolDef(
+        "extender",
+        "TP-Link range extender (RE series). action=status (model, mode, uplink signal, mesh role) | uplink "
+        "(the network it connects to) | extended (networks it broadcasts) | guest | mesh | network | clients | "
+        "wifi_advanced | system (mode, time, LEDs, eco, power schedule) | logs. Secrets masked unless reveal.",
+        extender.extender,
+        {"action": _action(["status", *[k for k in extender.SECTIONS if k != "status"]], "status")},
+        read_only=True, kinds=("extender",)))
+    register(ToolDef(
+        "extender_set",
+        "Change a range extender: action=led (enable) | led_night (enable, time_start, time_end) | "
+        "power_schedule (enable) | reboot. (Extended networks / high-speed mode: read them with extender; "
+        "writing them is not verified yet - use router_raw_write if needed.) No settings = show current values. Dry run "
+        "first; critical changes need the confirm_token. Journaled and undoable (except reboot).",
+        extender.extender_set,
+        {"action": _action(["led", "led_night", "power_schedule", "reboot"]),
+         "enable": {"type": "boolean"}, "settings": {"type": "object"}},
+        required=["action"], kinds=("extender",)))
+
+
 _register_all()
 _register_phase8()
+_register_extender()
