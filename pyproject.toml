@@ -62,11 +62,11 @@ mcp-tplink-router = "mcp_tplink_router:main"
 opus-tplink-mcp = "mcp_tplink_router:main"
 
 [project.urls]
-Homepage = "https://github.com/vehoelite/opus-tplink-mcp"
-Repository = "https://github.com/vehoelite/opus-tplink-mcp"
-Documentation = "https://github.com/vehoelite/opus-tplink-mcp#readme"
-Issues = "https://github.com/vehoelite/opus-tplink-mcp/issues"
-Changelog = "https://github.com/vehoelite/opus-tplink-mcp/releases"
+Homepage = "https://github.com/by-ai-for-ai/opus-tplink-mcp"
+Repository = "https://github.com/by-ai-for-ai/opus-tplink-mcp"
+Documentation = "https://github.com/by-ai-for-ai/opus-tplink-mcp#readme"
+Issues = "https://github.com/by-ai-for-ai/opus-tplink-mcp/issues"
+Changelog = "https://github.com/by-ai-for-ai/opus-tplink-mcp/releases"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_tplink_router"]
