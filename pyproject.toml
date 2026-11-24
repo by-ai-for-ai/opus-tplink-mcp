@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "opus-tplink-mcp"
 version = "1.2.0"
-description = "Built by AI, for AI: a safety-first MCP server for TP-Link Archer (BE series) routers and RE range extenders - tested with local models; dry runs, confirm tokens, verification, journal and undo"
+description = "Built by AI, for AI: a safety-first MCP server for TP-Link Archer routers (BE series; AX / AXE in testing) and RE range extenders - tested with local models; dry runs, confirm tokens, verification, journal and undo"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}

@@ -6,7 +6,8 @@ An AI wrote it (reverse-engineering the routers' own web pages, testing every wr
 AI is who it's for: an agent that can change a home network safely, see exactly what it is about
 to do, prove that it worked, and undo it.
 
-**A complete, safety-first MCP server for TP-Link Archer routers (Wi-Fi 7 / BE series) and RE range extenders.**
+**A complete, safety-first MCP server for TP-Link Archer routers (Wi-Fi 7 BE series; Wi-Fi 6 AX / 6E AXE
+models [in testing](#tested-routers)) and RE range extenders.**
 33 tools covering virtually everything the router's web UI can do. Every change goes through
 the same pipeline: **dry run → review → apply → verify → journal → undo**.
 

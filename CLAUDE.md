@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > architecture, commands or release flow change, and keep it free of anything private (addresses,
 > MACs, names, passwords, hostnames of real networks).
 
-MCP server (stdio) for TP-Link Archer BE routers and RE range extenders, published on PyPI as
+MCP server (stdio) for TP-Link Archer BE routers (AX / AXE models being added) and RE range extenders, published on PyPI as
 `opus-tplink-mcp` (import package `mcp_tplink_router`). It drives the devices through the same
 LuCI form requests their web UI sends, behind a dry-run / confirm-token / journal / undo pipeline.
 
