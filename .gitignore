@@ -56,3 +56,4 @@ screenshots/
 # OS
 .DS_Store
 Thumbs.db
+bench-results/

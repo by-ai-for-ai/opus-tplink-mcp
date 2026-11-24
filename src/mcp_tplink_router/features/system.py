@@ -8,7 +8,7 @@ from typing import Any
 from .. import forms
 from ..safety import Plan
 from ..transport import RouterError
-from . import OFF, ON, Ctx, UsageError, find_mac, onoff
+from . import OFF, ON, Ctx, UsageError, boolish, find_mac
 
 SIMPLE_FORMS = {
     # action: (path, friendly description)
@@ -82,7 +82,7 @@ def system(ctx: Ctx) -> Plan | dict[str, Any]:
         if not settings:
             return {action: ctx.read(path)}
         cur = ctx.read(path)
-        changes = {k: (onoff(v) if isinstance(v, bool) and isinstance(cur.get(k), str) else v)
+        changes = {k: boolish(cur.get(k), v)
                    for k, v in settings.items()}
         plan = ctx.plan("system", f"change {what}", path)
         plan.add(forms.plan_write(path, cur, changes, label=what))

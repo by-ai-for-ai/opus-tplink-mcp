@@ -108,7 +108,7 @@ def test_guest_wifi(apply, call, fake) -> None:  # type: ignore[no-untyped-def]
 
 def test_journal_keeps_wifi_secret_for_undo(apply, rt, fake) -> None:  # type: ignore[no-untyped-def]
     done = apply("wifi_set", action="set", band="2g", settings={"password": "brand-new-pass-1"})
-    assert WIFI_PSK in rt.journal.path.read_text()
+    assert WIFI_PSK not in rt.journal.path.read_text()  # encrypted at rest, still restorable
     apply("router_undo", id=done["journal_id"])
     assert fake.state["wireless?form=wireless_2g"]["psk_key"] == WIFI_PSK
 

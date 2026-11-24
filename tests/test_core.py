@@ -148,10 +148,12 @@ def test_journal_permissions_and_listing(apply, call, rt) -> None:  # type: igno
     assert shown["status"] == "applied" and shown["before"]["upnp?form=enable"]["enable"] == "on"
 
 
-def test_journal_keeps_secrets_but_show_redacts(apply, call, rt) -> None:  # type: ignore[no-untyped-def]
+def test_journal_encrypts_secrets_at_rest_but_show_redacts(apply, call, rt) -> None:  # type: ignore[no-untyped-def]
     done = apply("wifi_set", action="set", band="2g", settings={"password": "brand-new-pass-1"})
     raw = rt.journal.path.read_text()
-    assert "brand-new-pass-1" in raw and WIFI_PSK in raw
+    assert "brand-new-pass-1" not in raw and WIFI_PSK not in raw  # never plain text on disk
+    entry = rt.journal.get(done["journal_id"])  # ... but the journal itself can still read it for undo
+    assert "brand-new-pass-1" in json.dumps(entry) and WIFI_PSK in json.dumps(entry)
     shown = call("router_journal", action="show", id=done["journal_id"])
     assert "brand-new-pass-1" not in json.dumps(shown) and WIFI_PSK not in json.dumps(shown)
 
@@ -214,3 +216,275 @@ def test_unreachable_device_gets_an_address_hint_not_the_one_session_hint() -> N
                                           "(Caused by ConnectTimeoutError(... 'Connection to 192.0.2.9 timed out.'))")
     out = run_tool("router_status", {}, Runtime(factory=down, journal=Journal(), retry_delay=0))
     assert out["error"] == "login_failed" and "did not answer" in out["hint"] and "ONE admin" not in out["hint"]
+
+
+def test_every_change_needs_a_dry_run_token(call, fake) -> None:  # type: ignore[no-untyped-def]
+    # Local-model bench (Bonsai 27B, 1-bit): it sent apply=true without ever previewing whenever allowed.
+    out = call("system", action="led", enable=False, apply=True)
+    assert out["applied"] is False and "dry run first" in out["refused"] and fake.writes() == []
+    assert out["dry_run"] and out["diff"] and out["confirm_token"]  # the refusal IS the dry run
+    done = call("system", action="led", enable=False, apply=True, confirm_token=out["confirm_token"])
+    assert done["status"] == "applied"
+
+
+def test_a_change_request_that_only_reads_is_never_reported_as_success(call, fake) -> None:
+    # Local-model bench: Bonsai left out action=set, wifi_set fell back to action=get, and the model told the
+    # user "5 GHz has been turned off" while nothing changed.
+    out = call("wifi_set", action="get", band="5g", settings={"enable": "off"}, apply=True, confirm_token="abc123")
+    assert out["applied"] is False and out["changed"] is False and "NOTHING WAS CHANGED" in out["error"]
+    assert "action=set" in out["hint"] and fake.writes() == []
+    # Without an action the settings now mean "set": a fake token is refused, nothing is sent.
+    fake_tok = call("wifi_set", band="5g", settings={"enable": "off"}, apply=True, confirm_token="abc123")
+    assert fake_tok["applied"] is False and fake_tok["refused"] and fake.writes() == []
+    led = call("system", action="led", apply=True)  # no enable / settings: a read
+    assert led["changed"] is False
+
+
+def test_settings_without_action_means_set(call, fake) -> None:
+    # Local-model bench: Bonsai left out action=set on every wifi_set call and looped on reads.
+    out = call("wifi_set", band="5g", settings={"enable": "off"})
+    assert out["dry_run"] and out["confirm_token"] and "action=set" in out["assumed"]
+    done = call("wifi_set", band="5g", settings={"enable": "off"}, apply=True, confirm_token=out["confirm_token"])
+    assert done["status"] == "applied" and done["verified"] == "yes"
+
+
+def test_nothing_changed_reply_carries_the_exact_next_call(call) -> None:
+    out = call("wifi_set", action="get", band="5g", settings={"enable": "off"}, apply=True)
+    assert "NOTHING WAS CHANGED" in out["error"]
+    assert out["next_call"]["arguments"] == {"action": "set", "band": "5g", "settings": {"enable": "off"}}
+
+
+def test_raw_and_catalog_tools_point_to_the_dedicated_tool(call) -> None:
+    # Local-model bench: Nemotron 3 Nano 4B could not find system action=led and tried router_raw_write.
+    cat = call("router_catalog", filter="led")
+    assert any(r.get("use_tool") == "system action=led" for r in cat["forms"])
+    raw = call("router_raw_read", path="ledgeneral?form=setting")
+    assert raw["use_instead"].startswith("system action=led")
+    w = call("router_raw_write", path="ledgeneral?form=setting", operation="write", fields={"enable": "off"})
+    assert any("USE THE DEDICATED TOOL INSTEAD: system action=led" in x for x in w["warnings"])
+    bad = call("router_raw_read", path="system?form=led")
+    assert "use the tool: system action=led" in bad["error"]
+
+
+def test_made_up_settings_are_rejected_not_dropped(call) -> None:
+    # Local-model bench: Granite 4 H Tiny sent wifi_set band=guest settings={"led_off": true}; the tool
+    # dropped the unknown key, returned no_change, and the model told the user the LEDs were off.
+    out = call("wifi_set", action="set", band="guest", settings={"led_off": True})
+    assert "use the tool system action=led" in out["error"]
+    out = call("wifi_set", action="set", band="guest", settings={"made_up_field": 1})
+    assert "no setting(s) ['made_up_field']" in out["error"]
+
+
+def test_no_change_says_nothing_changed(call) -> None:
+    cur = call("system", action="led")["led"]["enable"]
+    out = call("system", action="led", enable=cur == "on")
+    assert out["tell_user"].startswith("NOTHING WAS CHANGED") and out.get("applied") is not True
+
+
+def test_true_false_sent_as_text_are_understood(call, fake) -> None:
+    # Local-model bench: Nemotron sent settings={"enable": "false"}; the router stored "off" and the tool
+    # misreported a mismatch.  "false"/"true" as text on an on/off field mean off/on.
+    fake.state["ledgeneral?form=setting"] = {"enable": "on", "time_set": "yes", "ledst_support": "yes"}
+    dry = call("system", action="led", settings={"enable": "false"})
+    assert dry["diff"][0]["changes"]["enable"]["to"] == "off"
+    done = call("system", action="led", settings={"enable": "false"}, apply=True, confirm_token=dry["confirm_token"])
+    assert done["status"] == "applied" and done["verified"] == "yes"
+
+
+def test_a_dry_run_says_it_is_not_done_yet(call) -> None:
+    # Local-model bench: Gemma 4 12B ran the dry run four times, never applied, and said "LEDs turned off".
+    out = call("system", action="led", enable=False)
+    assert list(out)[:2] == ["status", "tell_user"] and out["status"] == "PREVIEW_ONLY"
+    assert out["verified"] == "not_done_yet" and out["tell_user"].startswith("THIS IS A PREVIEW")
+    refused = call("system", action="led", enable=False, apply=True)
+    assert refused["status"] == "REFUSED_NOTHING_CHANGED" and refused["applied"] is False and refused["refused"]
+    assert refused["tell_user"].startswith("NOT DONE - NOTHING CHANGED") and refused["next_call"]["arguments"]["apply"]
+    # Step 2 exactly as handed over works.
+    nxt = out["next_call"]
+    assert nxt["tool"] == "system" and nxt["arguments"]["apply"] is True
+    done = call(nxt["tool"], **nxt["arguments"])
+    assert done["status"] == "applied" and done["verified"] == "yes"
+
+
+def test_compact_tool_set_is_opt_in(call, monkeypatch) -> None:
+    from mcp_tplink_router.server import tool_definitions
+
+    assert len(tool_definitions()) == 33  # default: everything
+    monkeypatch.setenv("TPLINK_TOOLSET", "core")
+    names = {t.name for t in tool_definitions()}
+    assert "router_raw_write" not in names and {"wifi_set", "system", "router_undo"} <= names
+    out = call("router_raw_write", path="ledgeneral?form=setting", operation="write", fields={"enable": "off"})
+    assert "compact tool set" in out["error"] and "system" in out["tools"]
+
+
+def test_wifi_set_top_level_enable_means_band_on_off(call) -> None:
+    # Local-model bench: Gemma 4 E4B (compact set) sent action=set band=5g enable=false, got "settings
+    # required, e.g. ssid/password", and then filled in ssid/password "dummy".
+    out = call("wifi_set", action="set", band="5g", enable=False)
+    assert out["dry_run"] and out["diff"][0]["changes"]["enable"]["to"] == "off"
+    err = call("wifi_set", action="set", band="5g")
+    assert "enable=false" in err["error"] and "never fill in a name or password" in err["error"]
+
+
+def test_every_literal_example_in_the_descriptions_works(call, fake) -> None:
+    import json as _json
+    import re as _re
+
+    from mcp_tplink_router.tools import EXAMPLES
+
+    for tool, examples in EXAMPLES.items():
+        for ex in examples:
+            raw = _re.match(r"(\{.*?\})(\s|$)", ex).group(1)
+            if "<" in raw or "small tier only" in ex:
+                continue  # placeholders are filled from another call; small-tier examples are tested there
+            args = _json.loads(raw)
+            if tool.startswith("extender"):
+                continue  # needs an extender-kind device
+            out = call(tool, **args)
+            assert "error" not in out, (tool, args, out.get("error"))
+
+
+def test_status_never_reports_empty_firmware_as_nulls(call, fake) -> None:
+    # Bench: the BE3600 sometimes answered the firmware read with no details; router_status passed on
+    # model/firmware_version/hardware_version = null and a model told the user "firmware: not specified".
+    real = fake.state["firmware?form=upgrade"]
+    fake.state["firmware?form=upgrade"] = {}
+    out = call("router_status")
+    assert "unavailable" in out["firmware"] and None not in out["firmware"].values()
+    fake.state["firmware?form=upgrade"] = real
+    assert "unavailable" not in call("router_status")["firmware"]
+
+
+def test_every_applied_change_carries_its_undo(call) -> None:
+    dry = call("system", action="led", enable=False)
+    done = call("system", **dry["next_call"]["arguments"])
+    assert done["undo_call"] == {"tool": "router_undo", "arguments": {"id": done["journal_id"]}}
+    assert "To reverse it: router_undo id=" in done["tell_user"]
+
+
+def test_preview_mode_critical_applies_normal_changes_directly(call, monkeypatch) -> None:
+    monkeypatch.setenv("TPLINK_PREVIEW", "critical")
+    out = call("system", action="led", enable=False)  # no apply, no token: a normal change applies at once
+    assert out["status"] == "applied" and out["verified"] == "yes" and out["undo_call"]
+    crit = call("wifi_set", action="set", band="2g", enable=False)  # critical: still a preview
+    assert crit["status"] == "PREVIEW_ONLY"
+    from mcp_tplink_router.server import tool_definitions
+    assert "APPLY IN ONE CALL" in next(t for t in tool_definitions() if t.name == "system").description
+
+
+def test_server_remembers_unfinished_changes(call) -> None:
+    # Local-model bench: Gemma 4 12B planned "dry run, then apply" in its reasoning, lost that plan on the next
+    # turn (clients do not send reasoning back) and previewed the same change five times.  The server keeps
+    # the task state instead.
+    first = call("system", action="led", enable=False)
+    assert first["status"] == "PREVIEW_ONLY"
+    again = call("system", action="led", enable=False)
+    assert again["status"] == "ALREADY_PREVIEWED" and "Send next_call now" in again["tell_user"]
+    # An unrelated call is NOT reminded (it could nudge a model into a change nobody asked for) ...
+    assert "pending" not in call("router_status")
+    # ... a call to the same tool is.
+    same = call("system", action="led")
+    assert same["pending"]["changes"][0]["change"] == first["summary"]
+    assert "ONLY if the user's current request asked" in same["pending"]["note"]
+    done = call("system", **again["next_call"]["arguments"])
+    assert done["status"] == "applied" and "pending" not in done
+    assert "pending" not in call("system", action="led")
+
+
+def test_small_tier_repeat_confirms_short_replies_compact_tools(call, monkeypatch) -> None:
+    # Local-model bench: Gemma 4 12B reasoned only on its first turn, then re-sent its own last call unchanged.
+    monkeypatch.setenv("TPLINK_MODEL_TIER", "small")
+    first = call("wifi_set", action="set", band="2g", enable=False)
+    assert first["status"] == "PREVIEW_ONLY" and "details" in first and "same request again" in first["tell_user"]
+    again = call("wifi_set", action="set", band="2g", enable=False)  # identical repeat = confirmation
+    assert again["status"] == "applied" and again["verified"] == "yes" and "repeating" in again["details"]["mode"]
+    from mcp_tplink_router.server import tool_definitions
+    names = {t.name for t in tool_definitions()}
+    assert "router_raw_write" not in names  # compact set by default in the small tier
+    assert call("router_status")["model_tier"] == "small"
+
+
+def test_large_tier_repeat_does_not_confirm(call) -> None:
+    call("wifi_set", action="set", band="2g", enable=False)
+    again = call("wifi_set", action="set", band="2g", enable=False)
+    assert again["status"] == "ALREADY_PREVIEWED" and again["applied"] is False
+
+
+def test_small_tier_declined_preview_is_not_revived_by_a_later_repeat(call, monkeypatch) -> None:
+    # A repeat confirms only as the VERY NEXT call after its preview; after anything else (e.g. the user
+    # declined and the model did other things), the same request gets a fresh preview.
+    monkeypatch.setenv("TPLINK_MODEL_TIER", "small")
+    first = call("wifi_set", action="set", band="2g", enable=False)
+    assert first["status"] == "PREVIEW_ONLY"
+    call("router_status")  # something else happened in between
+    later = call("wifi_set", action="set", band="2g", enable=False)
+    assert later["status"] in ("PREVIEW_ONLY", "ALREADY_PREVIEWED") and later["applied"] is False
+
+
+def test_small_tier_repeat_window_expires(call, monkeypatch) -> None:
+    from mcp_tplink_router import safety
+
+    monkeypatch.setenv("TPLINK_MODEL_TIER", "small")
+    call("wifi_set", action="set", band="2g", enable=False)
+    for e in safety.PENDING["main"].values():
+        e["at"] -= 120  # two minutes ago
+    out = call("wifi_set", action="set", band="2g", enable=False)
+    assert out["applied"] is False
+
+
+def test_small_tier_states_recent_changes_and_undoes_the_last_without_an_id(call, fake, monkeypatch) -> None:
+    monkeypatch.setenv("TPLINK_MODEL_TIER", "small")
+    fake.state["ledgeneral?form=setting"] = {"enable": "on", "time_set": "yes", "ledst_support": "yes"}
+    assert str(call("router_status")["recent_changes"]).startswith("none")  # the truth before any change
+    call("system", action="led", enable=False)
+    done = call("system", action="led", enable=False)  # repeat = confirm (small tier)
+    assert done["status"] == "applied"
+    rc = call("router_status")["recent_changes"]
+    assert rc[-1]["id"] == done["journal_id"] and rc[-1]["status"] == "applied"
+    prev = call("router_undo")  # no id: the most recent change, previewed first
+    assert prev["status"] == "PREVIEW_ONLY"
+    undone = call("router_undo")
+    assert undone["status"] == "applied" and fake.state["ledgeneral?form=setting"]["enable"] == "on"
+
+
+def test_large_tier_undo_still_needs_an_id(call) -> None:
+    assert "id is required" in call("router_undo")["error"]
+
+
+def test_small_tier_undo_without_id_ignores_old_changes(call, fake, rt, monkeypatch) -> None:
+    monkeypatch.setenv("TPLINK_MODEL_TIER", "small")
+    fake.state["ledgeneral?form=setting"] = {"enable": "on", "time_set": "yes", "ledst_support": "yes"}
+    call("system", action="led", enable=False)
+    assert call("system", action="led", enable=False)["status"] == "applied"
+    import json as _json
+    p = rt.journal.path  # age every entry by an hour: a change from another conversation
+    lines = [_json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+    p.write_text("".join(_json.dumps({**r, "ts": r["ts"] - 3600} if "ts" in r else r) + "\n" for r in lines))
+    out = call("router_undo")
+    assert "nothing recent to undo" in out["error"]
+
+
+def test_a_fake_confirm_token_is_reported_as_refused_not_as_a_preview(call) -> None:
+    # Local-model bench: Gemma 4 12B sent confirm_token="abc123", got PREVIEW_ONLY and told the user "turned off".
+    out = call("wifi_set", action="set", band="5g", enable=False, apply=True, confirm_token="abc123")
+    assert out["status"] == "REFUSED_NOTHING_CHANGED" and out["applied"] is False
+    assert out["tell_user"].startswith("NOT DONE - NOTHING CHANGED")
+
+
+def test_small_tier_memory_tells_the_truth_first(call, monkeypatch) -> None:
+    # Local-model bench: Gemma 4 12B wrote "5 GHz turned off" from its own turn-1 plan without reading the refusal.
+    monkeypatch.setenv("TPLINK_MODEL_TIER", "small")
+    out = call("wifi_set", action="set", band="5g", enable=False, apply=True, confirm_token="abc123",
+               intent="turn off the 5 GHz Wi-Fi")
+    assert list(out)[0] == "memory"
+    m = out["memory"]
+    assert m["you_were_asked_to"] == "turn off the 5 GHz Wi-Fi" and m["is_it_done"] == "NO"
+    assert m["what_actually_happened"].startswith("NOT DONE - refused")
+    # it carries over to the next call, and flips to YES only when the device confirms
+    again = call("wifi_set", **out["next_call"]["arguments"])
+    assert again["memory"]["is_it_done"] == "YES" and again["memory"]["you_were_asked_to"] == "turn off the 5 GHz Wi-Fi"
+
+
+def test_large_tier_has_no_memory_block(call) -> None:
+    out = call("wifi_set", action="set", band="5g", enable=False)
+    assert "memory" not in out

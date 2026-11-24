@@ -23,6 +23,8 @@ EXTENDER_FORMS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "status?form=device": ("read", "connected client counters", ()),
     "status?form=guest": ("read", "guest network state", ()),
     "status?form=wifi": ("read", "Wi-Fi state", ()),
+    "status?form=ap_status": ("read", "live state of each broadcast band (hardened UI)", ("password", "psk_key", "wpa_key")),
+    "status?form=mlo": ("read", "live MLO network state (Wi-Fi 7)", ("password", "psk_key", "wpa_key", "mlo_password")),
     "easy_mesh?form=mesh_info": ("read", "EasyMesh membership and sync state", ()),
     "one_mesh?form=mesh_info": ("read", "OneMesh membership and synced SSIDs", ()),
     "connect?form=settings": ("read", "the network this extender connects to (uplink)", ("password", "psk_key")),
@@ -138,7 +140,7 @@ def extender(ctx: Ctx) -> Any:
 
 # ------------------------------------------------------------------------------------------- writes
 from .. import forms  # noqa: E402
-from ..safety import Plan  # noqa: E402
+from ..safety import SETTLE_PROBES, Plan  # noqa: E402
 from . import settings_change  # noqa: E402
 
 _SIMPLE = {
@@ -151,8 +153,94 @@ _SIMPLE = {
 }
 
 
+MLO_PATH = "extend?form=settings"
+MLO_BANDS = {"2g": "band2", "5g": "band5", "6g": "band6"}
+
+
+REPEATER_STATUS = "status?form=repeater_status"
+
+
+def mlo_settle_probe(fields: dict[str, Any]) -> Any:
+    """After a write that touches the MLO network the extender restarts its Wi-Fi: what to check once it is back."""
+    if not any(k.startswith("mlo_") for k in fields):
+        return None
+    want = fields.get("mlo_enable")
+
+    def probe(t2: Any) -> dict[str, Any]:
+        st = t2.call(REPEATER_STATUS, "read")
+        st = st if isinstance(st, dict) else {}
+        links = {name: st.get(f"repeater_conn_{k}") for name, k in (("2.4 GHz", "24g"), ("5 GHz", "5g"))
+                 if st.get(f"repeater_enable_{k}") == "enable"}
+        out: dict[str, Any] = {"mlo": st.get("mlo_enable"), "links_to_router": links}
+        if want and st.get("mlo_enable") and st.get("mlo_enable") != want:
+            out["mismatch"] = f"the MLO network is {st.get('mlo_enable')}, not {want}"
+        down = [n for n, v in links.items() if v != "connected"]
+        if down:
+            out["waiting"] = f"its {' and '.join(down)} link to your router is still reconnecting"
+        return out
+
+    return probe
+
+
+SETTLE_PROBES[MLO_PATH] = mlo_settle_probe  # undo / raw writes of this form wait for the restart too
+
+
+def _extender_mlo(ctx: Ctx) -> Any:
+    """MLO network on an extender that has one (e.g. RE3200BE): on/off and which bands it joins."""
+    cur = ctx.read(MLO_PATH)
+    support = cur.get("mlo_band_support")
+    if not support:
+        raise UsageError("this extender has no MLO network (only Wi-Fi 7 models such as the RE3200BE have one)")
+    support = [support] if isinstance(support, str) else list(support)
+    enable = ctx.arg("enable")
+    bands = ctx.arg("bands")
+    settings = ctx.args.get("settings") if isinstance(ctx.args.get("settings"), dict) else {}
+    # Bench (Nemotron 4B): put enable inside settings, as the LED actions allow, and got a read
+    if enable is None and "enable" in settings:
+        enable = settings["enable"]
+    if bands is None and "bands" in settings:
+        bands = settings["bands"]
+    if enable is None and bands is None:
+        on = cur.get("mlo_enable") == "on"
+        return {"current": {"enable": cur.get("mlo_enable"), "ssid": cur.get("mlo_ssid"),
+                            "bands": [b for b, k in MLO_BANDS.items() if cur.get(f"mlo_{k}") == "on"],
+                            "supported_bands": [b for b, k in MLO_BANDS.items() if k in support]},
+                # Bench (Gemma E4B): asked to turn MLO off, it kept calling action=mlo without enable - a read
+                "note": f"This only READ the MLO network (it is {'on' if on else 'off'}). To turn it "
+                        f"{'off' if on else 'on'}, call extender_set with action=mlo and enable={'false' if on else 'true'}."}
+    changes: dict[str, Any] = {}
+    if enable is not None:
+        changes["mlo_enable"] = "on" if (enable is True or str(enable).lower() in ("on", "true", "1")) else "off"
+    if bands is not None:
+        bands = [bands] if isinstance(bands, str) else list(bands)
+        bad = [b for b in bands if b not in MLO_BANDS or MLO_BANDS[b] not in support]
+        if bad:
+            raise UsageError(f"unsupported MLO band(s) {bad}; this extender supports "
+                             f"{[b for b, k in MLO_BANDS.items() if k in support]}")
+        if len(bands) < 2:
+            raise UsageError("an MLO network needs at least two bands, e.g. bands=[\"2g\", \"5g\"]")
+        for b, k in MLO_BANDS.items():
+            if k in support:
+                changes[f"mlo_{k}"] = "on" if b in bands else "off"
+    plan = ctx.plan("extender_set", "change the extender's MLO network", MLO_PATH)
+    plan.add(forms.plan_write(MLO_PATH, cur, changes, label="MLO network"))
+    plan.critical_reasons.append("Wi-Fi 7 devices on the MLO network reconnect; a mesh agent may get these values "
+                                 "overwritten by the next mesh sync")
+    plan.warnings.append("this restarts the extender's Wi-Fi: ALL its networks and its link to your router drop "
+                         "briefly (seen: under a minute), the 5 GHz link to the router can take a few minutes to "
+                         "return, and without a reserved address the extender may come back at a new IP address. "
+                         "The tool waits for it and reports what came back.")
+    plan.settle_probe = mlo_settle_probe(changes)
+    if not plan.steps:
+        return {"status": "no_change", "tell_user": "NOTHING WAS CHANGED: the MLO network already has these values.",
+                "current": {k: cur.get(k) for k in ("mlo_enable", "mlo_band2", "mlo_band5", "mlo_band6")}}
+    return plan
+
+
 def extender_set(ctx: Ctx) -> Any:
     action = ctx.need("action")
+    if action == "mlo":
+        return _extender_mlo(ctx)
     if action == "reboot":
         plan = Plan(tool="extender_set", summary=f"reboot extender {ctx.router} (about 1-2 minutes offline)")
         plan.add(forms.plan_custom("system?form=reboot", "reboot"))
@@ -168,4 +256,12 @@ def extender_set(ctx: Ctx) -> Any:
     bad = [k for k in settings if allowed and k not in allowed]
     if bad:
         raise UsageError(f"{action} accepts {list(allowed)}; got {bad}")
-    return settings_change(ctx, "extender_set", path, settings, what, critical=critical)
+    out = settings_change(ctx, "extender_set", path, settings, what, critical=critical)
+    if action == "led_night" and isinstance(out, dict) and "current" in out and not settings:
+        # Bench: asked to "turn on night mode", models stopped to ask the user for times.  The extender keeps
+        # its times; say so with the exact call.
+        cur = out["current"]
+        times = " - ".join(str(cur.get(k)) for k in ("time_start", "time_end") if cur.get(k))
+        out["note"] = (f"To turn night mode on or off, enable alone is enough: the saved times{' (' + times + ')' if times else ''} "
+                       "are used. Only pass time_start/time_end if the user asked for different times.")
+    return out

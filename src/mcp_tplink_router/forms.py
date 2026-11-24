@@ -59,7 +59,30 @@ def endpoint(path: str) -> catalog.Endpoint:
 # ---------------------------------------------------------------------------- reading
 def read_form(t: Any, path: str) -> dict[str, Any]:
     ep = endpoint(path)
-    data = t.call(path, ep.read_op or "read")
+    try:
+        data = t.call(path, ep.read_op or "read")
+    except RouterError as exc:
+        parts = catalog.split_forms(path)
+        if exc.code != "no such callback" or len(parts) < 2:
+            raise
+        # A combined read (wireless?form=guest_2g&form=...&form=guest_6g) fails as a whole when ONE form is
+        # missing - seen live: an Archer AX3000 has no guest_6g, so its 2.4/5 GHz guest Wi-Fi was unreadable.
+        # Read each form alone and merge them the way a combined reply is shaped (fields prefixed by form).
+        data, absent = {}, []
+        for part in parts:
+            form = part.split("form=", 1)[1]
+            try:
+                one = t.call(part, ep.read_op or "read")
+            except RouterError as e2:
+                if e2.code != "no such callback":
+                    raise
+                absent.append(form)
+                continue
+            if isinstance(one, dict):
+                data.update({f"{form}_{k}": v for k, v in one.items()})
+        if len(absent) == len(parts):
+            raise
+        data["_absent_forms"] = absent
     return data if isinstance(data, dict) else {"value": data}
 
 
@@ -192,7 +215,18 @@ def plan_write(path: str, current: dict[str, Any], changes: dict[str, Any], *, l
         raise ValueError(f"{path} has no known write format; use router_raw_write")
     unknown = [k for k in changes if k not in ep.write_fields]
     if unknown:
-        raise ValueError(f"{path} does not accept field(s) {unknown}; writable: {list(ep.write_fields)}")
+        from .features.hints import guess_tool
+
+        other = next((guess_tool(k) for k in unknown if guess_tool(k)), None)
+        raise ValueError(f"{path} does not accept field(s) {unknown}; writable: {list(ep.write_fields)}"
+                         + (f". If you meant something else, try the tool: {other}" if other else ""))
+    # Shape gate (design review): a form that READS fine on another model is not proof its fields mean the same.
+    # Never write a field this device's form does not have - the catalog's fields come from one model.
+    absent = [k for k in changes if current and k not in current]
+    if absent:
+        raise ValueError(f"not supported by this tool on this router: its {path} form has no field(s) {absent} "
+                         "(the model or firmware differs from what this tool was verified on). Nothing was sent; "
+                         "the setting may exist under another name in the router's own web page.")
     changed = {k: v for k, v in changes.items() if cmp_value(current.get(k)) != cmp_value(v)}
     if not changed:
         return None
@@ -486,6 +520,21 @@ def verify(t: Any, step: Step, reply: Any = None) -> dict[str, Any]:
             if ep.row_fields:
                 new = {k: v for k, v in new.items() if k in ep.row_fields}
             return _compare(rows[hits[0]], new, stable(step.path, step.old), ignore | {"key"})
+        if step.kind == "custom" and step.fields and ep and is_readable(ep):
+            # Custom-op writes (e.g. MLO) whose form can be read back: confirm what we can.  A difference is
+            # reported as unconfirmed, not as failure - the form may store values in another shape.
+            cur = read_form(t, step.path)
+            diff = {k: {"want": v, "got": cur.get(k)} for k, v in step.fields.items()
+                    if k not in ignore and k in cur and cmp_value(cur.get(k)) != cmp_value(v)}
+            checked = [k for k in step.fields if k in cur and k not in ignore]
+            if checked and not diff:
+                return {"applied": True, "checked": checked}
+            if diff:
+                return {"applied": None, "unconfirmed": diff}
     except RouterError as exc:
         return {"applied": None, "error": exc.code}
     return {"applied": None, "note": "this kind of step cannot be verified by re-reading"}
+
+
+def is_readable(ep: Any) -> bool:
+    return getattr(ep, "kind", "") == "form" and getattr(ep, "read_op", None) in ("read", "read_spf")

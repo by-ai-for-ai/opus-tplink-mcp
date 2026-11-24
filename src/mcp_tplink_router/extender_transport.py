@@ -89,6 +89,31 @@ def hmac_signature(key: str, iv: str, hash_hex: str, seq: int, data_len: int) ->
                    for i in range(0, len(raw), RSA_BLOCK))
 
 
+def _legacy_tls_adapter_cls() -> Any:
+    import ssl
+
+    from requests.adapters import HTTPAdapter
+
+    class _Adapter(HTTPAdapter):
+        """HTTPS to LAN extenders whose web UI offers only RSA key exchange (e.g. RE1750X: AES128-GCM-SHA256),
+        which current Python/OpenSSL defaults refuse with a handshake failure.  Certificates are self-signed
+        and not verified (as for the whole session)."""
+
+        def init_poolmanager(self, *a: Any, **k: Any) -> Any:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE  # nosec B501 - LAN devices with self-signed certificates
+            ctx.set_ciphers("DEFAULT:AES128-GCM-SHA256:AES256-GCM-SHA384:@SECLEVEL=1")
+            k["ssl_context"] = ctx
+            return super().init_poolmanager(*a, **k)
+
+    return _Adapter
+
+
+def _LegacyTLSAdapter() -> Any:  # noqa: N802 - reads like a class at the call site
+    return _legacy_tls_adapter_cls()()
+
+
 class _WebSession:
     """Shared HTTP plumbing: Referer on every request, JSON envelope parsing, one admin session."""
 
@@ -100,6 +125,7 @@ class _WebSession:
         self._timeout = timeout
         self._http = requests.Session()
         self._http.verify = False  # nosec B501 - devices use self-signed certificates on the LAN
+        self._http.mount("https://", _LegacyTLSAdapter())
         self._http.headers.update({"Referer": f"{self._host}/webpages/index.html", "Content-Type": FORM,
                                    "Accept": "application/json, text/plain, */*"})
         self._stok = ""
@@ -195,6 +221,9 @@ class HardenedTransport(_WebSession):
 
     def __init__(self, host: str, password_getter: Callable[[], str], *, timeout: float = 20.0) -> None:
         super().__init__(host, password_getter, timeout=timeout)
+        # Over HTTPS this web UI does NOT wrap requests (its GdprService encrypts only when the page is plain
+        # HTTP): plain form posts, the password RSA-encrypted with the login?form=keys key, confirm=true.
+        self._tls = self._host.startswith("https://")
         self._key = "".join(secrets.choice("0123456789") for _ in range(16))
         self._iv = "".join(secrets.choice("0123456789") for _ in range(16))
         self._seq = 0
@@ -231,6 +260,9 @@ class HardenedTransport(_WebSession):
 
     def login(self) -> None:
         pw = self._password()
+        if self._tls:
+            self._login_tls(pw)
+            return
         try:
             pkey = self._plain_json(self._post("login?form=keys", "operation=read", stok=""))["password"]
             auth = self._plain_json(self._post("login?form=auth", "operation=read", stok=""))
@@ -253,6 +285,24 @@ class HardenedTransport(_WebSession):
         if not self._stok:
             raise LoginRefused("login reply had no session token")
 
+    def _login_tls(self, pw: str) -> None:
+        try:
+            pkey = self._plain_json(self._post("login?form=keys", "operation=read", stok=""))["password"]
+            enc = _rsa_pkcs1_hex(pkey[0], pkey[1], pw)
+        except RouterError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise RouterError(E_BAD_REPLY, f"unexpected key reply: {type(exc).__name__}") from exc
+        try:
+            data = self._plain_json(self._post("login?form=login", f"operation=login&password={enc}&confirm=true",
+                                               stok=""))
+        except RouterError as exc:
+            raise LoginRefused(f"the device refused the login ({exc.code}); check the password. Not retried: "
+                               "failed logins lock the account") from exc
+        self._stok = str((data or {}).get("stok") or "")
+        if not self._stok:
+            raise LoginRefused("login reply had no session token")
+
     def _send(self, path: str, plain: str) -> Any:
         data = self._encrypt(plain)
         sign = hmac_signature(self._key, self._iv, hashlib.sha256(data.encode()).hexdigest(), self._seq, len(data))
@@ -262,7 +312,10 @@ class HardenedTransport(_WebSession):
         if not self._stok:
             return
         try:
-            self._send("admin/system?form=logout", "operation=write")
+            if self._tls:
+                self._post("admin/system?form=logout", "operation=write")
+            else:
+                self._send("admin/system?form=logout", "operation=write")
         except RouterError as exc:
             logger.debug("logout failed: %r", exc)
         self._stok = ""
@@ -272,4 +325,6 @@ class HardenedTransport(_WebSession):
         if not self._stok:
             raise RouterError(E_LOGIN, "not logged in")
         body = urlencode({**({"operation": op} if op else {}), **check_fields(fields)}, doseq=True)
+        if self._tls:
+            return self._plain_json(self._post(f"admin/{path.lstrip('/')}", body))
         return self._decrypted(self._send(f"admin/{path.lstrip('/')}", body))

@@ -69,11 +69,47 @@ Request flow: `server.py` (MCP glue, one lock per call) → `tools.run_tool` →
   pre-change auto-backup, Wi-Fi health probe, `plan_undo`, and `redact` (secrets masked unless
   `reveal`). `Plan.reboots` marks changes after which the device reboots (skip post-checks).
 - **`journal.py`** — append-only JSONL journal (before-state fsynced before the first request); the
-  basis of `router_undo`.
+  basis of `router_undo`. Device-state sections (`requests`/`before`/`after`/`wire`/`detail`) are
+  AES-256-GCM encrypted at rest (per-install key, `TPLINK_JOURNAL_KEY`); `entries()` decrypts, unreadable
+  entries carry `unreadable` and `plan_undo` refuses them. Never print a raw journal file; read it via
+  `router_journal` (redacted).
 - **`validate.py` / `netcalc.py`** — subnet, pool, reservation and MAC checks.
+- **`events.py`** — local event log (`events.jsonl`, 0600, redacted, rotated) written by `tools.run_tool`
+  for every reply worth a look, plus the firmware/mode watcher (`note_firmware`: model, hardware, firmware
+  and `system?form=sysmode` mode, read on a device's first use per process and every 6 h;
+  `firmware_changed` / `mode_changed`). Never raises. Followed by `watch.py` (terminal) and `viewer.py`
+  (PySide6 window, optional `gui` extra) - subcommands of the console script, which still runs the MCP
+  server when called with no argument.
+- **`capabilities.py`** — what a router does NOT support, learned live from "no such callback" / HTTP 404,
+  keyed on model + hardware + firmware + operation mode + the form selector (e.g. `band=6g`, never user
+  values), TTL 1 h, reset on a firmware/mode change and on a mode switch made through the tool. Refusals
+  say "not supported by this tool on <model>", never "the router lacks it".
+- **`reporting.py`** — optional field reports, OFF until a person chooses in an interactive `setup` or the
+  viewer (the env var can only force OFF; no MCP tool can change it). Payloads come only from `build()`
+  (fixed codes, categories, versions, validated model/fw); never from the event log. `server/report_server.py`
+  is the stdlib receiver: allowlisted fields, no stored IPs, per-day salted source ids, public totals only
+  for >= 5 distinct sources; reports never set "verified" (maintainer-written `verified.json` only).
 
 Reference data: `docs/router/endpoints.txt` (every form the UI references) and
 `tests/fixtures/shapes.json` (catalog write fields are checked against it).
+
+## Model tiers, memory and the local-model bench
+
+- `safety.model_tier()` reads `TPLINK_MODEL_TIER` (`large` default, `small` for local models). The small
+  tier is shaped around how small models were seen to fail (`docs/local-model-bench.md`): compact tool set
+  (`tools.CORE_TOOLS`), short replies (`tools.shorten`), repeat-confirm only as the very next call within
+  60 s (`safety.CALL_SEQ`, `REPEAT_WINDOW`), `recent_changes`, id-less `router_undo` within 10 minutes, and
+  the **task memory** (`tools.TASK_MEMORY`, `memory` block first in every reply). Safety is identical in
+  both tiers; never relax it per tier.
+- Previews go through `safety._preview` (status `PREVIEW_ONLY` / `ALREADY_PREVIEWED` / `REFUSED_NOTHING_CHANGED`,
+  `tell_user`, exact `next_call`); results carry `verified` + `tell_user` + `undo_call` (`safety.verdict`).
+  `safety.PENDING` remembers previewed-but-unapplied changes (shown only on calls to the same tool).
+- `bench/` runs local models (OpenAI-compatible server, e.g. LM Studio) against ONE test router
+  (`BENCH_HOST`, `BENCH_PASSWORD_FILE`, `BENCH_PROTOCOL`; `BENCH_TIER`, `BENCH_TOOLSET`, `BENCH_PREVIEW`,
+  `BENCH_PRESERVE_THINKING`). `python bench.py perfect` must score 7/7 before trusting a model result;
+  `report.py` re-scores saved summaries with the current checks and builds the color-coded table, with
+  plain-words reasons from `bench/failure-notes.json`. Fix the TOOL when a model fails, not the prompt;
+  fix the bench only when it scores a correct answer wrongly, and record that in the report.
 
 ## Conventions
 
@@ -86,3 +122,6 @@ Reference data: `docs/router/endpoints.txt` (every form the UI references) and
   locally administered `02-...` MACs).
 - Release: bump `pyproject.toml` version and `CHANGELOG.md`; publishing happens from a GitHub
   release tag `vX.Y.Z` on the public repo.
+- Changes for local-model results go through four gates before a bench batch: a test replaying the
+  failing call plus its passing neighbours, the full suite + ruff, the perfect agent 7/7 on every bench
+  device, and a canary of a model that previously PASSED the touched scenarios.

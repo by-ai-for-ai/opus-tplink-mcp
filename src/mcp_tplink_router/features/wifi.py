@@ -56,8 +56,16 @@ def wifi_set(ctx: Ctx) -> Plan | dict[str, Any]:
     if not band:
         raise UsageError("band is required")
     settings = _normalise(ctx.obj("settings"))
+    if ctx.args.get("enable") is not None and band not in ("guest_access",):
+        # enable at the top level of action=set means the band on/off (a small model sent exactly this, got
+        # "settings required" with an ssid/password example, and filled in ssid/password "dummy").
+        settings.setdefault("enable", onoff(ctx.args["enable"]))
+    if any("led" in str(k).lower() for k in settings):
+        raise UsageError("LEDs are not a Wi-Fi setting: use the tool system action=led (enable=true/false)")
     if not settings:
-        raise UsageError("settings={...} is required, e.g. {\"ssid\": \"Home\", \"password\": \"...\"}")
+        raise UsageError("say what to change: enable=false (or settings={\"enable\": \"off\"}) turns the band off; "
+                         "settings={\"ssid\": ...} or {\"password\": ...} change ONLY when the user asked for that - "
+                         "never fill in a name or password yourself")
     if band == "guest_access":
         path = "wireless?form=guest"
         plan = ctx.plan("wifi_set", "change guest network access/isolation", path)
@@ -69,6 +77,11 @@ def wifi_set(ctx: Ctx) -> Plan | dict[str, Any]:
         if any(b not in catalog.GUEST_BANDS for b in bands):
             raise UsageError(f"guest_band must be one of {list(catalog.GUEST_BANDS)} or all")
         cur = ctx.read(catalog.GUEST_PATH)
+        unknown = [k for k in settings if k not in catalog.GUEST_FIELDS
+                   and not any(f"guest_{b}_{k}" in cur for b in bands)]
+        if unknown:  # never drop a setting silently: the model then reports a change that never happened
+            raise UsageError(f"guest Wi-Fi has no setting(s) {unknown}; valid: {sorted(catalog.GUEST_FIELDS)}"
+                             + _elsewhere(unknown))
         changes = {f"guest_{b}_{k}": v for b in bands for k, v in settings.items()
                    if f"guest_{b}_{k}" in cur or k in catalog.GUEST_FIELDS}
         plan = ctx.plan("wifi_set", f"change guest Wi-Fi ({sub})", catalog.GUEST_PATH)
@@ -92,6 +105,13 @@ def wifi_set(ctx: Ctx) -> Plan | dict[str, Any]:
         plan.warnings.append("smart connect is ON: the router may apply 2.4 GHz settings to all bands")
     plan.add(forms.plan_write(path, cur, settings, label=f"{band} Wi-Fi"))
     return plan
+
+
+def _elsewhere(keys: list[str]) -> str:
+    from .hints import guess_tool
+
+    tool = next((guess_tool(k) for k in keys if guess_tool(k) and not guess_tool(k).startswith("wifi_set")), None)
+    return f". For that, use the tool: {tool}" if tool else ""
 
 
 def _check_psk(plan: Plan, settings: dict[str, Any]) -> None:

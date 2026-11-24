@@ -10,6 +10,14 @@ to do, prove that it worked, and undo it.
 33 tools covering virtually everything the router's web UI can do. Every change goes through
 the same pipeline: **dry run → review → apply → verify → journal → undo**.
 
+**Tested with local models:** 4 models running on a single GPU manage a real router *and* two range
+extenders with **zero false claims** - Gemma 4 12B and a 1-bit Bonsai 27B are perfect on all three
+devices (63/63), Nemotron 3 Nano 4B scores 62/63 and Gemma 4 E4B 60/63. See [Local models](#local-models).
+
+**Watch it work:** every error, refusal, verified change and firmware update is written to a local event
+log you can follow live in a window (`opus-tplink-mcp viewer`) or a terminal (`opus-tplink-mcp watch`).
+See [Watching the server](#watching-the-server).
+
 > Designed and re-engineered by **Claude Opus 5.5** (Anthropic), with **Fable 5.2** advising,
 > for [vehoelite](https://github.com/vehoelite). Grown from
 > [consigcody94/mcp-tplink-router](https://github.com/consigcody94/mcp-tplink-router) (MIT).
@@ -42,7 +50,7 @@ the same pipeline: **dry run → review → apply → verify → journal → und
 
 | Area | Tool | Highlights |
 |---|---|---|
-| Overview | `router_status` | WAN/LAN, internet state, Wi-Fi, clients, CPU/memory, firmware |
+| Overview | `router_status` | WAN/LAN, internet state, Wi-Fi, clients, CPU/memory, firmware; `capabilities=true`: what this tool found not supported on this router |
 | | `router_get` / `router_catalog` / `router_raw_read` | Read any section or any of the 238 forms; per-operation risk tier and verification status |
 | | `router_logs` | System log with level/type/text/time filters (never touches the router's own log filter) |
 | | `device_log` | Everything about one MAC: lease, reservation, every log line mentioning it, parental-control sites and blocked attempts, access/VPN/IoT status, traffic. Plus a local per-device history beyond what the router keeps |
@@ -60,13 +68,13 @@ the same pipeline: **dry run → review → apply → verify → journal → und
 | Routing | `routing` | Static routes and the live routing table |
 | Security | `access_control` / `parental_control` | Allow/block lists; HomeShield profiles, sites, pause internet |
 | Ports | `port_forwarding` / `upnp` | Virtual servers, port triggering, DMZ; UPnP and its mappings |
-| Clients | `clients` | Rename devices, per-device speed limits, IoT network isolation, game accelerator |
+| Clients | `clients` | Rename devices, per-device speed limits, IoT network isolation, game accelerator; **`traffic`**: how much data a device used, by name / IP / MAC, with hourly or daily history, on routers with a traffic monitor (Archer AX3000, AXE5400) |
 | USB | `usb` | Drives and partitions (scan, browse, share/hide a partition, eject), Samba/FTP/SFTP sharing, media server, Time Machine, USB 4G modem |
 | DDNS | `ddns` | TP-Link DDNS, No-IP, DynDNS |
 | Maintenance | `maintenance` | **Config backup and restore**, firmware (online, image upload, mesh satellites), **ping / traceroute**, operation mode, reboot schedule |
 | Admin | `admin` | Admin password (RSA-encrypted like the web UI), remote management, HTTPS, local-management list, recovery e-mail, user permissions |
 | System | `system` | **SPI firewall / ping replies**, LEDs, eco mode, time/NTP/DST, auto-update, QoS, device priority, reboot |
-| Extenders | `extender` / `extender_set` | RE range extenders: model, mode, uplink signal, mesh role, extended and guest networks, clients, logs; LEDs, LED night mode, power schedule, reboot |
+| Extenders | `extender` / `extender_set` | RE range extenders: model, mode, uplink signal, mesh role, extended and guest networks, clients, logs; LEDs, LED night mode, power schedule, MLO network (Wi-Fi 7), reboot |
 
 Read tools are annotated `readOnlyHint`; write tools are annotated `destructiveHint`. On an extender
 (`KIND=extender`) only `extender`, `extender_set`, `router_status`, `router_raw_read`, `router_journal`
@@ -135,13 +143,65 @@ repeated failures.
   router's own IP, leases and conflicts. A **randomised/private MAC** gets a warning.
 * **Journal:** `~/.local/state/mcp-tplink-router/journal.jsonl` (directory 0700, file 0600). The full
   *before* state is fsynced before the first request; the exact fields sent (`wire`) and the
-  result follow. The journal keeps secrets so undo can restore them.
+  result follow. Undo needs the old values (including Wi-Fi passwords and VPN keys), so the journal keeps
+  them, **encrypted at rest**: everything that holds device state is sealed with AES-256-GCM under a
+  random per-install key, `~/.config/opus-tplink-mcp/journal.key` (0600, `TPLINK_JOURNAL_KEY` to move it).
+  Only the labels needed to list changes (id, time, tool, summary, status) stay readable. This protects the
+  journal when it is copied on its own: pasted into an issue, synced, or printed by an assistant. It does
+  not protect against someone logged in as you, and a backup that also holds `~/.config` holds the key
+  too. Without the key, changes are still listed but cannot be undone automatically (the tool says so and
+  sends nothing). Journals from older versions are encrypted the first time the server starts; copies
+  made before that (backups, snapshots) are not reached.
 * **Undo:** `router_undo id=...` restores old values, removes inserts, re-adds removed rows and
   swaps updates back. It refuses if the router changed since, unless you pass `force`. Reboots,
   firmware and other one-way actions are not undoable.
 * **Secrets** (PSKs, passwords, private/preshared keys, PINs, tokens) are masked in every result,
   diff and error unless you pass `reveal=true`. Account passwords are read from files, never from
   tool arguments.
+* **Says what it changed:** previews and results name the change itself ("THIS IS A PREVIEW of: change 5g
+  Wi-Fi (enable: on -> off)"), so a wrong band or field is visible before step 2, and a model relays what
+  actually happened.
+* **Knows what each router supports:** when a router's firmware does not have a feature's form, the reply
+  is `NOT_SUPPORTED` - "not supported by this tool on <model> (hardware, firmware); nothing was changed; it
+  may still exist in the router's own web page" - and the tool remembers it for that exact model,
+  firmware and operation mode for an hour, refusing up front next time. A firmware or mode change resets
+  it. `router_status capabilities=true` lists what it has found. A form that answers on a different model
+  is never written with fields it does not have.
+* **Restarts are reported, not hidden:** a change that restarts a device's Wi-Fi (MLO on the RE3200BE) is
+  warned about in the preview; afterwards the tool waits for the device and reports what came back.
+
+## Watching the server
+
+Everything worth a look is written to a local event log, `events.jsonl` next to the journal (0600, secrets
+masked, rotated at 5 MB): errors, refusals, "not done", recoveries after a model mistake, unknown devices,
+features a router does not support, unreachable devices, failed logins, verified changes, Wi-Fi restarts,
+and the model / hardware / firmware / operation mode each device reports. A **firmware or mode change is
+flagged** (a TP-Link cloud update can change a router overnight).
+
+* `opus-tplink-mcp viewer` - a live window (`pip install 'opus-tplink-mcp[gui]'`): devices with their
+  firmware and last event, above a colour-coded log. Read-only; it never talks to a router.
+* `opus-tplink-mcp watch` - the same live in a terminal (`--router`, `--kind`, `--no-follow`).
+
+### Optional field reports (off unless you turn them on)
+
+The server can send **field reports** to a small public server run by the maintainer, so problems get
+fixed and the list of supported routers grows by itself. **It is OFF until a person chooses:** the first
+time you open the viewer, or when you run `opus-tplink-mcp setup`, a notice explains exactly what is sent
+and you pick ON or OFF. No setting an AI agent can write turns it on (`TPLINK_REPORTING=off` can only
+force it off), and nothing is sent while it is off.
+
+* **Sent if on:** an error code from a fixed list, a feature *category* ("wifi", "access controls"), the
+  error type, where in the tool it happened, tool / Python / OS-family versions, and the router's model /
+  hardware / firmware - once per model and firmware, not per use.
+* **Never sent:** passwords, IP or MAC addresses, Wi-Fi names, device or host names, what you asked for,
+  error messages or file paths. No install ID. Your IP address reaches the server (it is run by an
+  individual); the server does not store it.
+* `opus-tplink-mcp report --dry-run` prints exactly what would be sent; every report actually sent is
+  also written to `reports-sent.jsonl`.
+* Public totals: <https://by-ai-for-ai.com/api/opus-tplink-mcp/about> (what is stored and why),
+  `/devices` (routers seen in the field) and `/errors`. A combination appears only once **5 different
+  sources** reported it. Reports can be faked - the client is open source - so they **never** mark a
+  router as supported; "verified" comes only from the maintainer's own tests.
 
 ## Tested routers
 
@@ -153,6 +213,8 @@ repeated failures.
 
 Other Archer BE models with the same web UI (Archer BE*xxxx*, firmware from 2024 on) should work.
 
+**Probed read-only (2026-11), writes not yet verified:** Archer AXE5400 v1.0 (fw 1.5.6, `encrypted-v2`), Archer AX4400 v1.0 (fw 1.3.6, `encrypted`) and Archer AX3000 v1.0 (fw 1.0.6, `encrypted`). Most reads work; features their firmware does not have answer `NOT_SUPPORTED`; the traffic monitor (`clients action=traffic`) is verified on the AX3000 and AXE5400. Wire them by their **WAN** port when testing next to another router (their LAN ports run a DHCP server).
+
 ## Tested range extenders
 
 All four were tested in repeater mode as EasyMesh members of a BE9300.
@@ -162,9 +224,36 @@ All four were tested in repeater mode as EasyMesh members of a BE9300.
 | RE2700X v1.0 | 1.1.9 | extender | status, uplink, networks, mesh, clients, system, logs | LEDs, LED night mode, power schedule |
 | RE1750X v2.2 | 1.0.6 | extender | same | LEDs, LED night mode, power schedule |
 | RE1500X v2.0 | 1.1.0 | extender | same | LEDs, LED night mode, power schedule, reboot |
-| RE3200BE | 1.5.3 | encrypted-v2 | same | LEDs, LED night mode, power schedule |
+| RE3200BE | 1.5.3 | encrypted-v2 | same | LEDs, LED night mode, power schedule, MLO network on/off (restarts its Wi-Fi; the tool waits and reports) |
 
 `router_catalog` shows which operations are confirmed live and which come from the web UI's code.
+
+## Local models
+
+This server was designed and tested for models you run yourself. Set **`TPLINK_MODEL_TIER=small`** in
+your `.env` for a local model: it gets the 13 everyday tools, short replies, and a **memory** at the top of every reply
+(what it was asked to do, what actually happened, and whether it is done), so it cannot lose track of a
+change between turns. Safety is the same in every tier.
+
+Results on a real Archer BE3600 router and two range extenders (RE1750X, and the Wi-Fi 7 RE3200BE with
+its MLO network), 3 trials x 7 scenarios on each: reading, a normal change, a critical change, undo, a
+device that does not exist, "just apply it, skip the preview", and a fake confirm token:
+
+| | Model | Router | RE1750X | RE3200BE | False claims |
+|---|---|---|---|---|---|
+| 🟢 | Gemma 4 12B | 21/21 | 21/21 | 21/21 | 0 |
+| 🟢 | Bonsai 27B (1-bit, 4.7 GB) | 21/21 | 21/21 | 21/21 | 0 |
+| 🟡 | Nemotron 3 Nano 4B | 20/21 | 21/21 | 21/21 | 0 |
+| 🟡 | Gemma 4 E4B | 20/21 | 21/21 | 19/21 | 0 |
+
+🟢 perfect · 🟡 85 %+ with no false claims · 🔴 made a false claim. Use a 🟢 or 🟡 model. Every miss above
+was reported honestly to the user (for example "nothing was changed"). In every run, with every model,
+nothing reached a device without a preview and every fake confirm token was refused. Gemma 4 E2B and
+Granite 4 H Tiny made false claims in the earlier router-only round and are not supported.
+
+The full report - method, every failure in plain words, what each one changed in the tools, and the
+bench's own mistakes - is in [docs/local-model-bench.md](docs/local-model-bench.md). The harness is in
+[`bench/`](bench/): run it against your own test router and send your results.
 
 ## Install
 
@@ -176,14 +265,35 @@ From source: `python -m venv venv && venv/bin/pip install -e ".[dev]"`.
 
 ## Configuration
 
-Copy `.env.example` to `.env`, or pass the variables from your MCP client config.
+Settings live in a `.env` file. Start from the annotated template:
+
+```bash
+mkdir -p ~/.config/opus-tplink-mcp
+curl -o ~/.config/opus-tplink-mcp/.env https://raw.githubusercontent.com/by-ai-for-ai/opus-tplink-mcp/main/.env.example
+chmod 600 ~/.config/opus-tplink-mcp/.env   # then edit it: router address, password file, model tier
+```
+
+The server reads the first of: the file named by `TPLINK_ENV_FILE`, `~/.config/opus-tplink-mcp/.env`,
+`./.env`. Variables set in your MCP client's own `env` block take precedence over the file.
+**Set `TPLINK_MODEL_TIER=small` if a local model drives the server** ([why](#local-models)).
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `TPLINK_HOST` | `192.168.0.1` | Router address (`https://...` if it redirects) |
 | `TPLINK_PASSWORD` | | The **plain** admin password |
+| `TPLINK_PROTOCOL` | `plain` | `encrypted` for older encrypted firmware (BE4800 1.0.x, BE3600), `extender` / `encrypted-v2` for an extender |
+| `TPLINK_KIND` | from the protocol | `router` or `extender` |
+| `TPLINK_ENV_FILE` | | Path of the `.env` file to read (default: `~/.config/opus-tplink-mcp/.env`, then `./.env`) |
+| `TPLINK_PASSWORD_FILE` | | File holding the admin password (preferred over `TPLINK_PASSWORD`) |
+| `TPLINK_MODEL_TIER` | `large` | Pick for the model that drives the server. `large` (cloud/frontier models): every tool, preview then `next_call`, full replies. `small` (local models): the compact tool set, short replies (status / `tell_user` / `next_call` first), and an identical repeat of a just-previewed request confirms it, but only as the very next call and within a minute (anything in between, e.g. a declined preview, means a fresh preview). Small-tier replies start with a `memory` (what the model was asked, what actually happened, `is_it_done`) and carry `recent_changes` (what this server actually changed in the last 10 minutes, or "none"), and `router_undo` without an id undoes the most recent change from the last 10 minutes (previewed first; older changes need their id). The small tier trades some deliberateness (a repeat instead of a copied token) for usability. Safety is identical in both: every change is previewed, verified, journaled and undoable |
+| `TPLINK_PREVIEW` | `always` | `always` = every change is previewed first (dry run + confirm token). `critical` = normal changes apply on the first call (each result carries its `undo_call`); critical changes are still previewed |
+| `TPLINK_TOOLSET` | `full` | `core` = the 13 everyday tools only (about 3.7k tokens instead of 10.5k): for small local models with short context windows; also hides the raw escape hatch |
 | `TPLINK_TIMEOUT` | `20` | Per-request timeout (s) |
 | `TPLINK_JOURNAL_DIR` | `~/.local/state/mcp-tplink-router` | Journal (also the default parent of backups and device logs) |
+| `TPLINK_EVENTS_FILE` | `<journal>/events.jsonl` | Local event log followed by `watch` / `viewer` |
+| `TPLINK_REPORTING` | (unset) | `off` forces field reports off. It cannot turn them on: that takes `opus-tplink-mcp setup` or the viewer |
+| `TPLINK_SETTLE_SECONDS` | `90` | How long to wait for a device whose Wi-Fi restarts after a change (MLO) |
+| `TPLINK_JOURNAL_KEY` | `~/.config/opus-tplink-mcp/journal.key` | Key that encrypts the journal at rest (created on first use, 0600). Keep it: without it, old changes cannot be undone automatically |
 | `TPLINK_BACKUP_DIR` | `<journal>/backups` | Where `maintenance action=backup` saves config files (mode 600) |
 | `TPLINK_DEVICE_LOG_DIR` | `<journal>/device-logs` | Per-MAC histories written by `device_log action=record` |
 | `TPLINK_AUTO_BACKUP` | `1` | Download a config backup before every critical change (`0` = off) |
@@ -193,7 +303,14 @@ Copy `.env.example` to `.env`, or pass the variables from your MCP client config
 MCP client entry (stdio):
 
 ```json
-{"command": "uvx", "args": ["opus-tplink-mcp"], "env": {"TPLINK_HOST": "192.168.0.1", "TPLINK_PASSWORD": "..."}}
+{"command": "uvx", "args": ["opus-tplink-mcp"]}
+```
+
+That uses `~/.config/opus-tplink-mcp/.env`. To keep the file elsewhere, or for a second setup (e.g. one
+for a local model and one for a cloud model):
+
+```json
+{"command": "uvx", "args": ["opus-tplink-mcp"], "env": {"TPLINK_ENV_FILE": "/path/to/local-model.env"}}
 ```
 
 (or `"command": "/path/to/venv/bin/opus-tplink-mcp"` for a local install)

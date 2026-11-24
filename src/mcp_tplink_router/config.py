@@ -44,9 +44,15 @@ class RouterConfig:
 
 def load_routers(env: Mapping[str, str] | None = None) -> dict[str, RouterConfig]:
     env = os.environ if env is None else env
+    main_proto = (env.get("TPLINK_PROTOCOL") or "plain").lower()
+    if main_proto not in PROTOCOLS:
+        raise ValueError(f"TPLINK_PROTOCOL must be one of {PROTOCOLS}")
+    main_kind = (env.get("TPLINK_KIND") or ("extender" if main_proto == "extender" else "router")).lower()
+    if main_kind not in KINDS:
+        raise ValueError(f"TPLINK_KIND must be one of {KINDS}")
     routers = {
         "main": RouterConfig(
-            name="main", host=env.get("TPLINK_HOST", "192.168.0.1"), protocol="plain",
+            name="main", host=env.get("TPLINK_HOST", "192.168.0.1"), protocol=main_proto, kind=main_kind,
             password=env.get("TPLINK_PASSWORD", ""), password_file=env.get("TPLINK_PASSWORD_FILE") or None,
             timeout=float(env.get("TPLINK_TIMEOUT", "20")),
         )

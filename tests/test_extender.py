@@ -181,3 +181,94 @@ def test_http_errors_map_to_router_errors(monkeypatch: Any) -> None:
     with pytest.raises(RouterError) as ei:
         t.call("status?form=rootAP", "read")
     assert ei.value.code == "server_error" and ei.value.ambiguous
+
+
+class FakeHardenedTLS:
+    """encrypted-v2 over HTTPS: the web UI does not wrap requests (TLS does): plain forms, the password RSA
+    PKCS#1-encrypted with the login?form=keys key, confirm=true.  A signed/AES body gets 'no such callback'."""
+
+    def __init__(self) -> None:
+        self.pkey = RSA.generate(2048)
+        self.logins = 0
+
+    def post(self, url: str, data: str = "", timeout: float = 0, **kw: Any) -> _Resp:  # noqa: ARG002
+        path = url.split(";stok=", 1)[1]
+        q = parse_qs(data, keep_blank_values=True)
+        if path == "/login?form=keys":
+            return _Resp({"success": True, "data": {"password": list(_hex_n(self.pkey)), "mode": "repeater"}})
+        if path == "/login?form=login":
+            if "sign" in q or q.get("operation") != ["login"] or q.get("confirm") != ["true"]:
+                return _Resp({"success": False, "errorcode": "no such callback"})
+            self.logins += 1
+            pw = PKCS1_v1_5.new(self.pkey).decrypt(bytes.fromhex(q["password"][0]), None)
+            return _Resp({"success": True, "data": {"stok": "T1"}} if pw == PW.encode() else
+                         {"success": False, "errorcode": "login failed"})
+        assert path.startswith("T1/admin/") and "sign" not in q
+        return _Resp({"success": True, "data": {"path": path.split("/admin/")[1], "fields": dict(q)}})
+
+
+def test_hardened_over_https_uses_plain_forms(monkeypatch: Any) -> None:
+    fake = FakeHardenedTLS()
+    t = et.HardenedTransport("https://192.0.2.9", lambda: PW)
+    monkeypatch.setattr(t._http, "post", fake.post)
+    with session(lambda: t) as s:
+        out = s.call("ledgeneral?form=setting", "write", {"enable": "off"})
+    assert out == {"path": "ledgeneral?form=setting", "fields": {"operation": ["write"], "enable": ["off"]}}
+    assert fake.logins == 1
+
+
+def test_extender_sessions_accept_legacy_rsa_tls() -> None:
+    from mcp_tplink_router.extender_transport import _WebSession
+
+    w = _WebSession("https://192.0.2.9", lambda: PW)
+    assert type(w._http.get_adapter("https://192.0.2.9/")).__name__ == "_Adapter"
+
+
+def test_extender_mlo_action(monkeypatch: Any) -> None:
+    from mcp_tplink_router.journal import Journal
+    from mcp_tplink_router.tools import Runtime, run_tool
+
+    state = {"mlo_enable": "on", "mlo_band2": "on", "mlo_band5": "on", "mlo_band6": "off", "mlo_band_support": ["band2", "band5"],
+             "mlo_ssid": "Home", "mlo_encryption": "wpa3", "mlo_password": "s3cret-pass", "enable_2g": "on", "ssid_2g": "Home",
+             "hide_2g": "off", "sec_follow_2g": "true", "sec_2g": "wpa3", "password_2g": "p", "mesh_enable": "on"}
+    sent: list[dict] = []
+    link5 = ["connected"]
+
+    class Dev:
+        def login(self) -> None: ...
+        def logout(self) -> None: ...
+        def call(self, path: str, op: str, fields: Any = None, **k: Any) -> Any:
+            if path == "status?form=repeater_status":  # what the tool checks after the Wi-Fi restart
+                return {"mlo_enable": state["mlo_enable"], "repeater_enable_24g": "enable",
+                        "repeater_enable_5g": "enable", "repeater_conn_24g": "connected",
+                        "repeater_conn_5g": link5[0]}
+            assert path == "extend?form=settings"
+            if op == "write":
+                sent.append(dict(fields))
+                state.update(fields)
+            return dict(state)
+
+    rt = Runtime(factory=Dev, journal=Journal(), name="ext", kind="extender", retry_delay=0)
+    assert run_tool("extender_set", {"router": "ext", "action": "mlo"}, rt)["current"]["bands"] == ["2g", "5g"]
+    dry = run_tool("extender_set", {"router": "ext", "action": "mlo", "enable": False}, rt)
+    assert dry["status"] == "PREVIEW_ONLY" and dry["risk"] == "critical"
+    assert dry["next_call"]["arguments"]["router"] == "ext"  # next_call targets the same device
+    out = run_tool("extender_set", dry["next_call"]["arguments"], rt)
+    assert out["verified"] == "yes" and state["mlo_enable"] == "off"
+    assert "restarts the extender's Wi-Fi" in json.dumps(dry)  # the preview warns before anything is sent
+    assert out["after_restart"]["back"] is True and "links connected" in out["tell_user"]
+    link5[0] = "disconnected"  # the 5 GHz uplink is slow to return: said plainly, the change itself stands
+    dry = run_tool("extender_set", {"router": "ext", "action": "mlo", "enable": True}, rt)
+    out = run_tool("extender_set", dry["next_call"]["arguments"], rt)
+    assert out["verified"] == "yes" and "5 GHz link to your router is still reconnecting" in out["tell_user"]
+    link5[0] = "connected"
+    undo = run_tool("router_undo", {"id": out["journal_id"]}, rt)
+    undone = run_tool("router_undo", {"id": out["journal_id"], "apply": True, "confirm_token": undo["confirm_token"]}, rt)
+    assert state["mlo_enable"] == "off" and undone["after_restart"]["back"] is True  # undo waits for the restart too
+    assert "mlo_band_support" not in sent[-1] and sent[-1]["mlo_password"] == "s3cret-pass"  # full UI payload
+    read = run_tool("extender_set", {"router": "ext", "action": "mlo"}, rt)
+    assert "enable=" in read["note"] and "only READ" in read["note"]  # E4B: a bare action=mlo is a read; say how to change
+    dry = run_tool("extender_set", {"router": "ext", "action": "mlo", "settings": {"enable": True}}, rt)
+    assert dry["status"] == "PREVIEW_ONLY"  # Nemotron: enable inside settings is understood, not a silent read
+    assert "at least two bands" in run_tool("extender_set", {"router": "ext", "action": "mlo", "bands": ["2g"]}, rt)["error"]
+    assert "supports ['2g', '5g']" in run_tool("extender_set", {"router": "ext", "action": "mlo", "bands": ["2g", "6g"]}, rt)["error"]

@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from .conftest import send  # noqa: E402
 from .fake_router import FakeTransport
 
 
@@ -182,7 +183,7 @@ def test_wps_push_holds_session_and_reports_outcome(call: Any, fake: FakeTranspo
     import time
 
     monkeypatch.setattr(time, "sleep", lambda s: None)
-    out = call("wifi_extra", action="wps_push", apply=True)
+    out = send(call, "wifi_extra", action="wps_push")
     v = out["verify"][0]
     assert v["outcome"] == "success" and v["succeeded"] and v["mac"] == "02-00-00-00-DD-01"
     assert v["states"] == ["ok", "success"]
@@ -190,7 +191,7 @@ def test_wps_push_holds_session_and_reports_outcome(call: Any, fake: FakeTranspo
     assert polls[0] == {"option": "connect"} and polls[-1] == {"option": "pbc"}
     assert fake.logins == 1 or all(c for c in fake.calls)  # one login for the whole session
     fake.wps_result = "timeout"
-    v = call("wifi_extra", action="wps_push", apply=True)["verify"][0]
+    v = send(call, "wifi_extra", action="wps_push")["verify"][0]
     assert v["outcome"] == "timeout" and v["succeeded"] is False
 
 
@@ -261,7 +262,7 @@ def test_rename_client_and_undo_for_wired_offline_device(apply: Any, call: Any, 
     assert _sent(fake, "traffic?form=dev_name", "write") == [{"mac": mac, "alias": "Kitchen NAS"}]
     dry = call("router_undo", id=out["journal_id"])
     assert "error" not in dry and not dry.get("errors"), dry
-    call("router_undo", id=out["journal_id"], apply=True)
+    send(call, "router_undo", id=out["journal_id"])
     assert _sent(fake, "traffic?form=dev_name", "write")[-1] == {"mac": mac, "alias": "nas-box"}
 
 
@@ -526,3 +527,12 @@ def test_leaving_router_mode_warns_about_remote_management(call: Any, fake: Fake
     assert [d["path"] for d in dry["diff"]] == ["system?form=sysmode"]
     assert any("turns remote management off" in w for w in dry["warnings"])
     assert call("maintenance", action="operation_mode", mode="router")["status"] == "no_change"
+
+
+def test_custom_step_writes_are_read_back_when_the_form_is_readable(apply: Any, fake: FakeTransport) -> None:
+    # MLO is sent as a custom op; it used to report "cannot be verified" even though the form can be read.
+    fake.state["wireless?form=mlo_host"] = {"enable": "off", "ssid": "Home", "hidden": "off", "encryption": "psk_sae",
+                                            "psk_key": "k-secret-1", "psk_version": "sae_only",
+                                            "selected_bands": ["2g", "5g"]}
+    out = apply("wifi_extra", action="mlo", enable=True)
+    assert out["verify"][0]["applied"] is True and out["verified"] == "yes"

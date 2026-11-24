@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "opus-tplink-mcp"
-version = "1.1.0"
-description = "Built by AI, for AI: a safety-first MCP server for TP-Link Archer (BE series) routers and RE range extenders - 33 tools, dry runs, confirm tokens, journal and undo"
+version = "1.2.0"
+description = "Built by AI, for AI: a safety-first MCP server for TP-Link Archer (BE series) routers and RE range extenders - tested with local models; dry runs, confirm tokens, verification, journal and undo"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -26,6 +26,8 @@ keywords = [
     "network",
     "range-extender",
     "easymesh",
+    "local-llm",
+    "lm-studio",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -44,7 +46,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "mcp>=1.5.0,<2",  # 2.x removed the low-level Server decorators this server uses
+    "mcp>=1.30.0,<2",  # 2.x removed the low-level Server decorators; <1.30.0 has CVE-2026-59951 and CVE-2026-116685
     "tplinkrouterc6u>=5.23,<6",
     "requests>=2.31.0",
     "pycryptodome>=3.19",  # extender protocols (RSA-OAEP, AES, HMAC)
@@ -52,6 +54,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gui = [
+    "PySide6>=6.6",  # opus-tplink-mcp viewer (live event window); not needed for the MCP server
+]
 dev = [
     "pytest>=7.0.0",
     "ruff>=0.4.0",

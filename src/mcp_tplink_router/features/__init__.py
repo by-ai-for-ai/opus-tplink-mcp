@@ -176,8 +176,21 @@ def pick(rows: list[dict[str, Any]], **match: Any) -> list[dict[str, Any]]:
     return [r for r in rows if all(forms.key_equal(k, r.get(k), v) for k, v in match.items())]
 
 
+_TRUE_WORDS = ("true", "on", "yes", "enable", "enabled", "1")
+_FALSE_WORDS = ("false", "off", "no", "disable", "disabled", "0")
+
+
 def boolish(cur: Any, value: Any) -> Any:
-    """Convert a caller's bool to the form's own vocabulary (on/off strings or real bools)."""
+    """Convert a caller's bool to the form's own vocabulary (on/off strings or real bools).
+
+    Also "true"/"false" sent as TEXT for an on/off field (small models do this; the router stored "off"
+    for "false" and the re-read was then misreported as a mismatch).
+    """
+    on_off_field = isinstance(cur, bool) or (isinstance(cur, str) and cur.lower() in _TRUE_WORDS + _FALSE_WORDS)
+    if isinstance(value, str) and on_off_field and value.strip().lower() in ("true", "false", "yes", "no",
+                                                                               "enable", "disable",
+                                                                               "enabled", "disabled"):
+        value = value.strip().lower() in _TRUE_WORDS
     if isinstance(value, bool):
         if isinstance(cur, bool):
             return value
@@ -211,7 +224,8 @@ def settings_change(ctx: Ctx, tool: str, path: str, settings: dict[str, Any], wh
     if warn:
         plan.warnings.append(warn)
     if not plan.steps:
-        return {"status": "no_change", "current": cur}
+        return {"status": "no_change", "verified": "no",
+                "tell_user": "NOTHING WAS CHANGED: the device already has these values.", "current": cur}
     return plan
 
 

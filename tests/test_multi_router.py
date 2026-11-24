@@ -82,7 +82,7 @@ def test_encrypted_requests_go_through_client_request(bcall, reg, kid) -> None: 
     out = bcall("dhcp_reservation", router="upstairs", action="leases")
     assert out["leases"]
     client = reg.routers["upstairs"].factory().clients[-1]  # type: ignore[attr-defined]
-    assert client.bodies[0] == ("admin/dhcps?form=client", "operation=load")
+    assert ("admin/dhcps?form=client", "operation=load") in client.bodies  # after the once-per-device firmware read
     assert UPSTAIRS_PASSWORD not in json.dumps(out)
     assert not kid.logged_in
 
@@ -107,12 +107,13 @@ def test_status_lists_routers_and_degrades(bcall) -> None:  # type: ignore[no-un
     assert out["router"] == "upstairs" and out["clients"]["total"] == 1
     assert "unavailable" in out["note"]
     assert bcall("router_catalog", router="upstairs", filter="dhcps")["risk_profile"].startswith("secondary")
-    assert "unknown router" in bcall("router_status", router="nope")["error"]
+    assert "NO router named" in bcall("router_status", router="nope")["error"]
 
 
 def test_no_such_callback_hint(bcall) -> None:  # type: ignore[no-untyped-def]
     out = bcall("router_get", router="upstairs", section="status")
-    assert out["error"] == "no such callback" and "upstairs" in out["hint"]
+    assert out["status"] == "NOT_SUPPORTED" and "upstairs" in out["hint"]
+    assert "not supported by this tool on" in out["tell_user"]
 
 
 def test_default_router_is_main(bcall, fake, kid) -> None:  # type: ignore[no-untyped-def]
@@ -158,3 +159,41 @@ def test_journal_records_router_and_undo_targets_it(bcall, kid, fake) -> None:  
     undo = _apply(bcall, "router_undo", id=done["journal_id"])
     assert undo["status"] == "applied" and len(kid.state["access_control?form=white_list"]) == 1
     assert len(fake.calls) == n_main  # main router untouched
+
+
+def test_main_router_can_use_the_encrypted_or_extender_protocol() -> None:
+    import pytest
+
+    from mcp_tplink_router.config import load_routers
+
+    assert load_routers({})["main"].protocol == "plain"
+    main = load_routers({"TPLINK_HOST": "192.0.2.1", "TPLINK_PROTOCOL": "encrypted"})["main"]
+    assert (main.protocol, main.kind) == ("encrypted", "router")
+    ext = load_routers({"TPLINK_PROTOCOL": "encrypted-v2", "TPLINK_KIND": "extender"})["main"]
+    assert (ext.protocol, ext.kind) == ("encrypted-v2", "extender")
+    with pytest.raises(ValueError):
+        load_routers({"TPLINK_PROTOCOL": "bogus"})
+
+
+def test_env_file_is_found_where_users_keep_it(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # A bare load_dotenv() searches from the installed package folder, so a user's .env was never found.
+    import os
+
+    from mcp_tplink_router import server
+
+    keys = ("TPLINK_ENV_FILE", "TPLINK_HOST", "TPLINK_MODEL_TIER")
+    saved = {k: os.environ.pop(k, None) for k in keys}
+    try:
+        cfg = tmp_path / "my.env"
+        cfg.write_text("TPLINK_HOST=192.0.2.7\nTPLINK_MODEL_TIER=small\n")
+        os.environ["TPLINK_ENV_FILE"] = str(cfg)
+        assert server.load_env_file() == cfg
+        assert os.environ["TPLINK_HOST"] == "192.0.2.7" and os.environ["TPLINK_MODEL_TIER"] == "small"
+        os.environ["TPLINK_HOST"] = "192.0.2.99"  # the MCP client's own env block wins over the file
+        server.load_env_file()
+        assert os.environ["TPLINK_HOST"] == "192.0.2.99"
+    finally:
+        for k in keys:
+            os.environ.pop(k, None)
+            if saved[k] is not None:
+                os.environ[k] = saved[k]

@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import socket
@@ -30,6 +31,44 @@ from .transport import RouterError
 
 TOKEN_TTL = 300
 _TOKEN_KEY = os.urandom(32)
+
+# The server's memory of previewed-but-not-applied changes, per router: {router: {key: entry}}.
+# Local-model bench: a model planned "dry run, then apply", lost that plan between turns (clients do not send
+# a model's reasoning back) and previewed the same change again and again.  The server keeps the task state
+# instead, shows it on every reply, and catches a repeated preview.
+PENDING: dict[str, dict[str, dict[str, Any]]] = {}
+PENDING_TTL = 300.0
+# Every tool call on a router bumps its sequence number; a small-tier repeat confirms only if it comes
+# straight after its preview (no call in between) and within REPEAT_WINDOW seconds.
+CALL_SEQ: dict[str, int] = {}
+REPEAT_WINDOW = 60.0
+
+
+def note_call(router: str) -> int:
+    CALL_SEQ[router] = CALL_SEQ.get(router, 0) + 1
+    return CALL_SEQ[router]
+
+
+def _pending_key(plan: Plan) -> str:
+    return hashlib.sha256(json.dumps([plan.tool, plan.summary, [s.to_dict() for s in plan.steps]],
+                                     sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def pending_for(router: str, tool: str | None = None, now: float | None = None) -> list[dict[str, Any]]:
+    """Unfinished (previewed, not applied) changes on ``router`` made with ``tool``, newest first.
+
+    Only the SAME tool's unfinished changes are shown: a reminder on an unrelated call could nudge a model
+    into applying a change the current request never asked for.
+    """
+    now = time.time() if now is None else now
+    entries = PENDING.get(router, {})
+    for k in [k for k, e in entries.items() if now - e["at"] > PENDING_TTL]:
+        del entries[k]
+    return [{"change": e["summary"], "previews": e["count"], "next_call": e["next_call"]}
+            for e in sorted(entries.values(), key=lambda e: -e["at"])
+            if tool is None or e["next_call"].get("tool") == tool]
+
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------------- redaction
 REDACTED = "<redacted>"
@@ -165,6 +204,10 @@ class Plan:
     secret_fields: tuple[str, ...] = ()
     router: str = "main"
     reboots: str = ""  # non-empty: the router reboots by itself after this change (text says how long)
+    # Set when the change restarts the device's Wi-Fi without a reboot (seen live: an MLO change on the
+    # RE3200BE drops every network and its uplink for ~5-30 s, and the 5 GHz uplink can take minutes).
+    # finalize() waits (bounded) until it answers again and reports what came back.
+    settle_probe: Any = None
 
     @property
     def risk(self) -> str:
@@ -203,7 +246,8 @@ def make_token(plan: Plan, now: float | None = None) -> str:
 def check_token(token: str | None, plan: Plan, now: float | None = None) -> str | None:
     """None if valid, else why not."""
     if not token:
-        return "this change is CRITICAL: run it once without apply, review the plan, then pass its confirm_token"
+        return ("every change needs a dry run first: review the plan below, then repeat the same call with "
+                "apply=true and its confirm_token")
     try:
         exp_s, mac = str(token).split(".", 1)
         exp = int(exp_s)
@@ -244,6 +288,36 @@ def diff(plan: Plan) -> list[dict[str, Any]]:
         base["risk"] = s.risk
         out.append(base)
     return out
+
+
+def change_words(plan: Plan, limit: int = 3) -> str:
+    """The change in plain words, e.g. "change 5g Wi-Fi (enable: on -> off)".
+
+    Bench (Nemotron 4B): previewed and applied turning OFF 5 GHz when asked for 2.4 GHz, then told the user "2.4 GHz
+    turned off" - the generic "DONE AND VERIFIED" never named the change.  Previews and results now say what it is,
+    so the model relays the real change and a wrong one is visible before step 2.
+    """
+    parts: list[str] = []
+    for st in plan.steps:
+        if st.kind in ("write", "update"):
+            for k, v in sorted((st.fields or {}).items(), key=lambda kv: kv[0] != "enable"):  # the switch first
+                old = (st.old or {}).get(k)
+                if forms_cmp(old) == forms_cmp(v):
+                    continue
+                if is_secret_field(k, plan.secret_fields):
+                    parts.append(f"{k}: changed")
+                elif not isinstance(v, (dict, list)):
+                    parts.append(f"{k}: {old if old not in (None, '') else '(empty)'} -> {v}")
+        elif st.kind == "insert":
+            parts.append("add an entry")
+        elif st.kind == "remove":
+            parts.append("remove an entry")
+    shown = parts[:limit] + ([f"+{len(parts) - limit} more"] if len(parts) > limit else [])
+    return plan.summary + (f" ({'; '.join(shown)})" if shown else "")
+
+
+def forms_cmp(v: Any) -> str:
+    return str(v).strip().lower() if v is not None else ""
 
 
 def describe(plan: Plan, reveal: bool = False) -> dict[str, Any]:
@@ -357,7 +431,7 @@ def apply_plan(t: Any, plan: Plan, journal: Journal, reopen: Reopen) -> dict[str
                     "collateral": coll, "error": collateral_msg}
     after = _affected_state(t, plan)
     unverified = [c for c in checks if c.get("applied") is False]
-    status = "applied"
+    status = "mismatch" if unverified else "applied"
     journal.finish(entry, status, after=after, detail={"verify": checks}, steps_applied=len(plan.steps))
     out: dict[str, Any] = {"status": status, "journal_id": entry, "steps_applied": len(plan.steps),
                            "verify": checks}
@@ -380,9 +454,8 @@ def gate(plan: Plan, args: dict[str, Any], *, allow_forbidden: bool | None = Non
                     "cloud bind). Only router_raw_write may send it, and only with TPLINK_ALLOW_FORBIDDEN=1 "
                     "in the server environment.")
         return check_token(args.get("confirm_token"), plan)
-    if risk == CRITICAL:
-        return check_token(args.get("confirm_token"), plan)
-    return None
+    # Every change, not only critical ones, needs the confirm_token of a dry run: nothing is ever sent unseen.
+    return check_token(args.get("confirm_token"), plan)
 
 
 def finalize(t: Any, plan: Plan, args: dict[str, Any], journal: Journal, reopen: Reopen,
@@ -393,17 +466,27 @@ def finalize(t: Any, plan: Plan, args: dict[str, Any], journal: Journal, reopen:
     if plan.errors:
         return {"applied": False, "errors": plan.errors, **desc}
     if not plan.steps:
-        return {"applied": False, "no_change": True, "summary": plan.summary, "warnings": plan.warnings}
-    if not args.get("apply"):
-        out: dict[str, Any] = {"dry_run": True, **desc}
-        if plan.risk in (CRITICAL, FORBIDDEN):
-            out["confirm_token"] = make_token(plan)
-            out["next"] = "review, then repeat the same call with apply=true and this confirm_token (valid 5 min)"
-        else:
-            out["next"] = "repeat the same call with apply=true to send it"
-        return out
-    refusal = gate(plan, args, allow_forbidden=allow_forbidden)
+        return {"applied": False, "no_change": True, "verified": "no",
+                "tell_user": "NOTHING WAS CHANGED: the device already has these values.",
+                "summary": plan.summary, "warnings": plan.warnings}
+    direct = preview_mode() == "critical" and plan.risk == NORMAL
+    # small tier: an identical repeat of a request previewed in the last 5 minutes confirms it.  Seen on the
+    # bench: a model reasoned only on its first turn, then re-sent its own last call unchanged - never the
+    # next_call.  The change was still previewed first; asking for exactly the same thing again is insisting.
+    prev = PENDING.get(plan.router, {}).get(_pending_key(plan))
+    # Only as the VERY NEXT call after its preview, within a minute: that is a model insisting (seen: it
+    # re-sends at once), not a request revived after the user declined it (that gets a fresh preview).
+    repeat_ok = (model_tier() == "small" and plan.risk != FORBIDDEN and prev is not None
+                 and time.time() - prev["at"] <= REPEAT_WINDOW
+                 and prev.get("seq") == CALL_SEQ.get(plan.router, 0) - 1)
+    if not args.get("apply") and not direct and not repeat_ok:
+        return _preview(plan, args, desc)
+    refusal = None if (direct or repeat_ok) else gate(plan, args, allow_forbidden=allow_forbidden)
     if refusal:
+        if plan.risk != FORBIDDEN or allow_forbidden or os.environ.get("TPLINK_ALLOW_FORBIDDEN") == "1":
+            # The refusal doubles as the dry run: the full plan plus a fresh token, so the next call can apply
+            # exactly what was shown (one round trip for small models, and nothing is ever sent unseen).
+            return _preview(plan, args, desc, refused=refusal)
         return {"applied": False, "refused": refusal, **desc}
     pre_backup = _auto_backup(t, plan)
     result = apply_plan(t, plan, journal, reopen)
@@ -421,8 +504,181 @@ def finalize(t: Any, plan: Plan, args: dict[str, Any], journal: Journal, reopen:
                 "pairing will fail. Restore the pre-change backup (maintenance action=restore file=...) "
                 + (f"({pre_backup.get('saved')})" if isinstance(pre_backup, dict) and pre_backup.get('saved') else
                    "or a recent backup") + ", or re-save the setting from the router's web page.")
+    result.update(verdict(result, plan))
+    attach_settle(plan)
+    if plan.settle_probe and result.get("status") == "applied":
+        _settle(result, plan, reopen)
+    if result.get("status") in ("applied", "partial", "mismatch", "collateral", "no_effect", "failed"):
+        PENDING.get(plan.router, {}).pop(_pending_key(plan), None)  # this change is no longer pending
+    jid = result.get("journal_id")
+    if jid and result.get("status") in ("applied", "partial", "mismatch", "collateral") and plan.tool != "router_undo":
+        result["undo_call"] = {"tool": "router_undo", "arguments": {"id": jid}}
+        result["tell_user"] = result["tell_user"] + f" To reverse it: router_undo id={jid}."
+    if direct:
+        result["mode"] = "applied directly (TPLINK_PREVIEW=critical: normal changes skip the preview)"
+    elif repeat_ok and not args.get("confirm_token"):
+        result["mode"] = "confirmed by repeating the previewed request (TPLINK_MODEL_TIER=small)"
     return redact({"applied": result["status"] in ("applied", "partial", "collateral"), **result, **desc},
                   reveal, plan.secret_fields)
+
+
+def model_tier() -> str:
+    """TPLINK_MODEL_TIER, chosen by the user for the model that drives this server.
+
+    large (default): full tool set, preview then next_call with the confirm token, full replies.
+    small: compact tool set, the same preview flow PLUS "an identical repeat of a just-previewed request
+    confirms it", and short replies (status / tell_user / next_call first, details nested).
+    Safety is the same in every tier: every change is previewed first, verified, journaled and undoable.
+    """
+    tier = os.environ.get("TPLINK_MODEL_TIER", "large").lower()
+    return tier if tier in ("large", "small") else "large"
+
+
+def preview_mode() -> str:
+    """always (default): every change is previewed first.  critical: normal changes apply on the first call
+    (each result carries its undo_call); critical and forbidden changes are still previewed."""
+    mode = os.environ.get("TPLINK_PREVIEW", "always").lower()
+    return mode if mode in ("always", "critical") else "always"
+
+
+def _preview(plan: Plan, args: dict[str, Any], desc: dict[str, Any], refused: str | None = None) -> dict[str, Any]:
+    out = _preview_body(plan, args, desc, refused)
+    key = _pending_key(plan)
+    entries = PENDING.setdefault(plan.router, {})
+    prev = entries.get(key)
+    count = (prev["count"] + 1) if prev and time.time() - prev["at"] <= PENDING_TTL else 1
+    entries[key] = {"summary": plan.summary, "count": count, "at": time.time(), "next_call": out["next_call"],
+                    "seq": CALL_SEQ.get(plan.router, 0)}
+    if count > 1 and not refused:
+        out["status"] = "ALREADY_PREVIEWED"
+        out["tell_user"] = (f"YOU ALREADY PREVIEWED THIS EXACT CHANGE ({count} times) - nothing more to check and nothing "
+                            f"has changed yet. Send next_call now to apply it (it has apply=true and a fresh "
+                            f"confirm_token). Do not preview it again.")
+        out = {"status": out["status"], "tell_user": out["tell_user"],
+               **{k: v for k, v in out.items() if k not in ("status", "tell_user")}}
+    return out
+
+
+def _preview_body(plan: Plan, args: dict[str, Any], desc: dict[str, Any], refused: str | None = None) -> dict[str, Any]:
+    """A dry run, spelled out as step 1 of 2 with the exact step-2 call.
+
+    Local-model bench: models took a preview for the finished change (one ran four previews and said
+    "LEDs turned off").  The status comes first, and step 2 is handed over ready to send.
+    """
+    token = make_token(plan)
+    step2 = {k: v for k, v in args.items() if k not in ("reveal", "confirm_token", "apply")}
+    if plan.router and plan.router != "main":  # run_tool consumed "router"; next_call must target the same device
+        step2["router"] = plan.router
+    step2.update({"apply": True, "confirm_token": token})
+    out: dict[str, Any] = {
+        "status": "PREVIEW_ONLY",
+        "tell_user": f"THIS IS A PREVIEW of: {change_words(plan)} - NOTHING HAS CHANGED YET. Step 1 of 2 is done. "
+                     f"Check this is what the user asked for. To make the change you "
+                     f"MUST do step 2: call {plan.tool} again with exactly the arguments in next_call (they include "
+                     f"apply=true and the confirm_token)"
+                     + (" - or send the same request again as your very next call" if model_tier() == "small" else "")
+                     + ". Do not tell the user it is done before step 2 succeeds.",
+        "next_call": {"tool": plan.tool, "arguments": step2},
+        "applied": False, "dry_run": True, "verified": "not_done_yet",
+    }
+    if refused:
+        # An apply that was refused must never look like step 1 of a normal preview.  Local-model bench:
+        # Gemma 4 12B sent a fake confirm_token, got status PREVIEW_ONLY back and told the user "turned off".
+        out["status"] = "REFUSED_NOTHING_CHANGED"
+        out["tell_user"] = (f"NOT DONE - NOTHING CHANGED: the device refused this request ({refused}). If the user "
+                            f"still wants it, the plan is below: send next_call (it has a valid confirm_token).")
+        out["refused"] = refused
+    out.update(desc)
+    out["confirm_token"] = token
+    out["next"] = "review the plan, then send next_call (valid 5 min)"
+    return out
+
+
+def verdict(result: dict[str, Any], plan: Plan) -> dict[str, Any]:
+    """The truth about a change, in one field a small model can pass on as-is.
+
+    ``verified``: yes (re-read confirms) | no (it did not take effect) | unknown (sent, cannot be confirmed)
+    | after_restart (applies as the device restarts; check again later).
+    """
+    st = result.get("status")
+    checks = result.get("verify") or []
+    done, total = result.get("steps_applied"), len(plan.steps)
+    if st in ("failed", "no_effect"):
+        why = result.get("error") or result.get("warning") or "the device did not apply it"
+        return {"verified": "no", "tell_user": f"NOT DONE: {why}. Nothing changed."}
+    if st == "mismatch":
+        bad = {k: v for c in checks for k, v in (c.get("mismatch") or {}).items()}
+        return {"verified": "no", "tell_user": "NOT DONE: the device accepted the request, but reading it back "
+                f"shows different values: {json.dumps(bad, default=str)[:300]}. Tell the user it did not take effect."}
+    if st == "collateral":
+        return {"verified": "no", "tell_user": "PROBLEM: the change affected other entries too (see collateral); "
+                "remaining steps were not sent. Use router_undo to restore them."}
+    if st == "unknown":
+        return {"verified": "unknown", "tell_user": "UNKNOWN: the connection dropped while sending; a re-read could "
+                "not confirm it either way. Check the current values before telling the user anything."}
+    if st == "partial" or (isinstance(done, int) and done < total):
+        return {"verified": "no", "tell_user": f"PARTLY DONE: {done} of {total} steps took effect (see verify)."}
+    if any(c.get("deferred") for c in checks) or plan.reboots:
+        return {"verified": "after_restart", "tell_user": "SENT: it takes effect as the device restarts (a few "
+                "minutes). Check again afterwards before telling the user it is done."}
+    if checks and all(c.get("applied") is True for c in checks):
+        return {"verified": "yes", "tell_user": f"DONE AND VERIFIED: {change_words(plan)}. Reading the device back "
+                                                f"confirms it. Tell the user exactly this change."}
+    return {"verified": "unknown", "tell_user": "SENT BUT NOT CONFIRMED: the device accepted it, but this change "
+            "cannot be read back. Tell the user it was sent, not that it is confirmed."}
+
+
+# form path -> builds a settle probe from the fields a step writes (None: this write does not restart the Wi-Fi).
+# Registered by the feature that knows the device (features/extender.py for the RE3200BE MLO form), so plans
+# built elsewhere - router_undo, router_raw_write - wait for the restart too.
+SETTLE_PROBES: dict[str, Callable[[dict[str, Any]], Any]] = {}
+
+
+def attach_settle(plan: Plan) -> None:
+    if plan.settle_probe:
+        return
+    for step in plan.steps:
+        make = SETTLE_PROBES.get(step.path)
+        probe = make(dict(step.fields or {})) if make else None
+        if probe:
+            plan.settle_probe = probe
+            return
+
+
+def _settle(result: dict[str, Any], plan: Plan, reopen: Reopen) -> None:
+    """Wait (bounded) for a device whose Wi-Fi restarts after this change, then report what came back."""
+    limit = float(os.environ.get("TPLINK_SETTLE_SECONDS", "90"))
+    first = min(8.0, limit)
+    deadline = time.time() + limit
+    time.sleep(first)
+    last: dict[str, Any] | None = None
+    while True:
+        try:
+            with reopen() as t2:
+                last = plan.settle_probe(t2)
+            if not last.get("waiting"):
+                break
+        except Exception:  # noqa: BLE001 - still restarting, or a probe bug: never changes an applied result
+            logger.debug("settle probe failed", exc_info=True)
+        if time.time() >= deadline:
+            break
+        time.sleep(min(10.0, max(0.0, deadline - time.time())))
+    if last is None:
+        result["after_restart"] = {"back": False}
+        result.update({"verified": "after_restart",
+                       "tell_user": "SENT: the device is restarting its Wi-Fi and has not answered again yet (this "
+                                    "can take a minute, and without a reserved address it may come back at a new "
+                                    "one). Check again before telling the user it is done."})
+        return
+    result["after_restart"] = {"back": True, **{k: v for k, v in last.items() if k != "waiting"}}
+    if last.get("mismatch"):
+        result.update({"verified": "no", "tell_user": f"NOT AS REQUESTED after the restart: {last['mismatch']}"})
+    elif last.get("waiting"):
+        result["tell_user"] = (str(result.get("tell_user", "")) + " The device restarted its Wi-Fi and is back, but "
+                               + str(last["waiting"]) + " - this can take a few minutes.").strip()
+    else:
+        result["tell_user"] = (str(result.get("tell_user", "")) + " The device restarted its Wi-Fi and is back with "
+                               "its links connected.").strip()
 
 
 def wifi_health(t: Any, *, tries: int = 4, wait: float = 10.0) -> dict[str, Any]:
@@ -491,12 +747,17 @@ def plan_undo(entry: dict[str, Any], t: Any, *, force: bool = False) -> Plan:
 
     plan = Plan(tool="router_undo", summary=f"undo {entry.get('id')}: {entry.get('summary', '')}",
                 undo_of=entry.get("id"), router=entry.get("router") or "main")
+    if entry.get("unreadable"):
+        plan.errors.append(f"cannot undo automatically: {entry['unreadable']} (journal key, encrypted at rest), so "
+                           "the old settings cannot be read; nothing was sent. Restore the old setting by hand, or put "
+                           "the original journal.key back")
+        return plan
     status = entry.get("status")
-    if status not in ("applied", "partial", "unknown", "collateral"):
+    if status not in ("applied", "partial", "unknown", "collateral", "mismatch"):
         plan.errors.append(f"entry status is {status!r}; nothing was applied to undo")
         return plan
     done = entry.get("steps_applied")
-    steps = [Step.from_dict(d) for d in entry.get("requests", [])]
+    steps = [Step.from_dict(d) for d in entry.get("requests") or []]
     if isinstance(done, int):
         steps = steps[:done]
     drift_msg = "the router no longer matches what that change left behind ({}); pass force=true to undo anyway"
@@ -571,4 +832,5 @@ def plan_undo(entry: dict[str, Any], t: Any, *, force: bool = False) -> Plan:
         except (RouterError, ValueError) as exc:
             plan.errors.append(f"{what}: {exc}")
     plan.before = _affected_state(t, plan)
+    attach_settle(plan)  # undoing a change that restarts the Wi-Fi restarts it again: wait for it the same way
     return plan

@@ -12,6 +12,7 @@ from ..netcalc import is_locally_administered, normalize_mac
 from ..safety import Plan, plan_undo, redact
 from ..transport import RouterError
 from . import Ctx, UsageError, is_on
+from .hints import dedicated_tool, guess_tool, use_instead
 
 # ------------------------------------------------------------------------------ status
 _STATUS_KEYS = (
@@ -29,6 +30,10 @@ def _try(fn: Any, *a: Any) -> Any:
 
 
 def router_status(ctx: Ctx) -> dict[str, Any]:
+    if ctx.arg("capabilities"):
+        from ..capabilities import summary
+
+        return summary(ctx.router, ctx.host)
     if ctx.kind == "extender":
         from .extender import extender_status
 
@@ -53,8 +58,20 @@ def router_status(ctx: Ctx) -> dict[str, Any]:
     out["clients"] = {"total": len(clients), "wired": sum(c["connection"] == "wired" for c in clients),
                       "wireless": sum(c["connection"] != "wired" for c in clients)}
     out["internet"] = _try(ctx.read, "status?form=internet")
+    from ..safety import model_tier
+
+    out["model_tier"] = model_tier()
+    keys = ("model", "firmware_version", "hardware_version")
     fw = _try(ctx.read, "firmware?form=upgrade")
-    out["firmware"] = {k: fw.get(k) for k in ("model", "firmware_version", "hardware_version")} if "error" not in fw else fw
+    if "error" not in fw and not any(fw.get(k) for k in keys):
+        fw = _try(ctx.read, "firmware?form=upgrade")  # the router sometimes answers empty while busy: ask once more
+    if "error" in fw:
+        out["firmware"] = {"unavailable": f"could not read the firmware details ({fw['error']}); ask again"}
+    elif not any(fw.get(k) for k in keys):
+        # Never pass on nulls as if they were the answer (a model reported "firmware: not specified").
+        out["firmware"] = {"unavailable": "the router returned no firmware details this time; ask again"}
+    else:
+        out["firmware"] = {k: fw.get(k) for k in keys}
     out["mode"] = _try(ctx.read, "system?form=sysmode").get("mode")
     out["vpn_client_enabled"] = _try(ctx.read, "vpn?form=enable").get("enable")
     return out
@@ -140,8 +157,12 @@ def router_catalog(ctx: Ctx) -> dict[str, Any]:
         if flt and flt not in p.lower() and flt not in str(d.get("section") or "").lower():
             continue
         ops = d.get("ops") or {}
-        rows.append({"path": p, "section": d.get("section"),
-                     "ops": {op: f"{v['risk']}/{v['verified']}" for op, v in ops.items()}})  # type: ignore[union-attr]
+        row = {"path": p, "section": d.get("section"),
+               "ops": {op: f"{v['risk']}/{v['verified']}" for op, v in ops.items()}}  # type: ignore[union-attr]
+        tool = dedicated_tool(p, ctx.kind)
+        if tool:
+            row["use_tool"] = tool
+        rows.append(row)
     return {"router": ctx.router, "routers": ctx.routers, "count": len(rows),
             "risk_profile": "main" if ctx.is_main else "secondary (VPN-client protection rules off; access-control "
             "mode/enable and parental internet pause are critical)", "legend": "op: risk/verified (live = tested on this router, ui = from the web UI's JS)",
@@ -174,14 +195,16 @@ def router_raw_read(ctx: Ctx) -> dict[str, Any]:
                 "data": redact(data, bool(ctx.arg("reveal")), EXTENDER_FORMS[path][2])}
     for single in catalog.split_forms(path):
         if catalog.get(single) is None:
-            raise UsageError(f"{single!r} is not a form the router UI uses (see router_catalog)")
+            guess = guess_tool(single)
+            raise UsageError(f"{single!r} is not a form the router UI uses"
+                             + (f"; for this, use the tool: {guess}" if guess else " (see router_catalog)"))
     if catalog.is_forbidden_path(path):
         raise UsageError(f"{path} is in the forbidden tier (debug/cloud/firmware-upload/quick-setup); not readable here")
     if not is_read_op(op) or catalog.risk_of(path, op) != catalog.READ:
         raise UsageError(f"operation {op!r} on {path} is not read-only; use router_raw_write")
     data = ctx.t.call(path, op, _fields_arg(ctx))
     ep = catalog.get(path)
-    return {"path": path, "operation": op,
+    return {"path": path, "operation": op, **use_instead(path, ctx.kind),
             "data": redact(data, bool(ctx.arg("reveal")), ep.secret_fields if ep else ())}
 
 
@@ -261,13 +284,35 @@ def router_journal(ctx: Ctx) -> dict[str, Any]:
     limit = int(ctx.arg("limit", 20))
     rows = [{"id": e["id"], "router": e.get("router", "main"), "tool": e.get("tool"), "summary": e.get("summary"), "status": e.get("status"),
              "risk": e.get("risk"), "undo_of": e.get("undo_of"),
-             "undoable": all(r.get("undoable", True) for r in e.get("requests", []))}
+             "undoable": not e.get("unreadable") and all(r.get("undoable", True) for r in e.get("requests") or [])}
             for e in ctx.journal.entries()]
     return {"journal": str(ctx.journal.path), "entries": list(reversed(rows))[:limit]}
 
 
 def router_undo(ctx: Ctx) -> Plan:
-    e = ctx.journal.get(str(ctx.need("id")))
+    from ..safety import model_tier
+
+    jid = ctx.arg("id")
+    if not jid:
+        if model_tier() != "small":
+            raise UsageError("id is required: find it with router_journal action=list")
+        # small tier: no id = the most recent change on this router (still previewed before anything is sent).
+        # Local-model bench: models could not find the journal id ("I could not find an action to undo").
+        undone = {e.get("undo_of") for e in ctx.journal.entries() if e.get("undo_of")}
+        # Only the last 10 minutes (the same window as recent_changes): an old change, maybe from another
+        # conversation, is never picked implicitly - it needs its id.
+        import time as _time
+
+        cands = [e for e in ctx.journal.entries()
+                 if e.get("router", "main") == ctx.router and e.get("status") in ("applied", "partial", "mismatch",
+                                                                                     "collateral")
+                 and e.get("tool") != "router_undo" and e.get("id") not in undone
+                 and _time.time() - float(e.get("ts") or 0) <= 600]
+        if not cands:
+            raise UsageError("nothing recent to undo: no change in the last 10 minutes. For an older change, pass its "
+                             "id (router_journal action=list)")
+        jid = cands[-1]["id"]
+    e = ctx.journal.get(str(jid))
     if e is None:
         raise UsageError("no journal entry with that id (see router_journal)")
     return plan_undo(e, ctx.t, force=bool(ctx.arg("force")))
@@ -279,10 +324,16 @@ def router_raw_write(ctx: Ctx) -> Plan:
     op = str(ctx.need("operation"))
     for single in catalog.split_forms(path):
         if catalog.get(single) is None:
-            raise UsageError(f"{single!r} is not a form the router UI uses (see router_catalog)")
+            guess = guess_tool(single)
+            raise UsageError(f"{single!r} is not a form the router UI uses"
+                             + (f"; for this, use the tool: {guess}" if guess else " (see router_catalog)"))
     fields = _fields_arg(ctx)
     risk = catalog.risk_of(path, op)
     plan = Plan(tool="router_raw_write", summary=f"raw {op} on {path}")
+    better = dedicated_tool(path, ctx.kind)
+    if better:
+        plan.warnings.append(f"USE THE DEDICATED TOOL INSTEAD: {better} (checked fields, verified, undoable). "
+                             "router_raw_write sends unchecked fields.")
     ep = catalog.get(path)
     inverse = None
     if op in ("write", "write_spf") and ep and ep.read_op and ep.kind == "form" and not ep.field_prefix:

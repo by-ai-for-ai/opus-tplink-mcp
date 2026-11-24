@@ -29,10 +29,17 @@ WRITE_PROPS: dict[str, Any] = {
                       "description": "Required with apply=true for CRITICAL changes: the token from the dry run "
                                      "(valid 5 minutes, bound to the exact plan and current router state)."},
     "reveal": {"type": "boolean", "default": False, "description": "Show secrets (passwords/keys) unmasked."},
+    "intent": {"type": "string", "description": "Optional: the user's request in your own words. The server "
+                                               "remembers it and reminds you of it, with what actually happened."},
 }
 REVEAL_PROP = {"reveal": WRITE_PROPS["reveal"]}
 ROUTER_PROP = {"router": {"type": "string", "default": "main",
-                          "description": "Which router (see router_status 'routers'); default main."}}
+                          "description": "Which device - router OR extender - by its name; default main. If the user "
+                                         "gives a device a NAME (\"the extender called X\", \"the upstairs router\"), "
+                                         "pass that name here, even if you are not sure it exists: the tool will say so. "
+                                         "Plain \"the extender\" / \"the router\" is not a name: leave router out. "
+                                         "'device' is accepted as the same argument."},
+              "device": {"type": "string", "description": "Same as router."}}
 
 
 @dataclass
@@ -57,6 +64,86 @@ TOOLS: dict[str, ToolDef] = {}
 
 def register(tool: ToolDef) -> None:
     TOOLS[tool.name] = tool
+
+
+# Ready-to-copy calls appended to each everyday tool's description.  Local-model bench: models failed on the
+# exact SHAPE of a call (missing action=set, enable at the wrong level, a preview taken for the change), and
+# their reasoning showed they needed a correct command to copy.  Rules: only the change itself (on/off, ids
+# from another call) - never a sample name or password a model could copy as a placeholder.  Every literal
+# example is executed against the fake router by tests/test_core.py.
+EXAMPLES: dict[str, list[str]] = {
+    "router_status": ['{}'],
+    "system": ['{"action": "led"}  (read the LEDs)', '{"action": "led", "enable": false}  (LEDs off)',
+               '{"action": "firewall"}  (read)'],
+    "wifi_set": ['{"action": "get", "band": "all"}', '{"action": "set", "band": "5g", "enable": false}  (5 GHz off)',
+                 '{"action": "set", "band": "2g", "enable": true}  (2.4 GHz on)'],
+    "clients": ['{"action": "list"}', '{"action": "rename", "mac": "<MAC from action=list>", "name": "<name the user gave>"}'],
+    "dhcp_reservation": ['{"action": "list"}',
+                         '{"action": "add", "mac": "<MAC from clients action=list>", "ip": "<address the user asked for>"}'],
+    "access_control": ['{"action": "status"}', '{"action": "block", "mac": "<MAC from clients action=list>"}'],
+    "parental_control": ['{"action": "owners"}',
+                         '{"action": "internet_block", "owner_id": "<id from action=owners>", "blocked": true}'],
+    "port_forwarding": ['{"action": "list"}'],
+    "router_logs": ['{"level": "WARNING", "limit": 20}'],
+    "router_journal": ['{"action": "list"}  (recent changes with their ids)'],
+    "router_undo": ['{"id": "<id from router_journal action=list>"}',
+                    '{}  (small tier only: undo the most recent change)'],
+    "extender": ['{"action": "status"}'],
+    "extender_set": ['{"action": "led", "enable": false}',
+                     '{"action": "led_night", "enable": true}  (night mode on, with the times already saved)',
+                     '{"action": "mlo", "enable": false}  (Wi-Fi 7 extenders: MLO network off)'],
+}
+TWO_CALLS = (" CHANGES TAKE TWO CALLS: (1) call without apply -> a preview (status PREVIEW_ONLY, nothing changed yet) "
+             "that includes next_call; (2) send next_call exactly as given - it has apply=true and the confirm_token. "
+             "Only after step 2 reports verified=yes is it done.")
+
+
+ONE_CALL = (" NORMAL CHANGES APPLY IN ONE CALL: the result says verified=yes/no and includes undo_call to reverse it. "
+            "CRITICAL changes still take two calls: (1) a preview (status PREVIEW_ONLY) with next_call; (2) send "
+            "next_call exactly as given.")
+
+
+def described(tool: ToolDef) -> str:
+    from .safety import model_tier, preview_mode
+
+    d = tool.description
+    if not tool.read_only:
+        d += ONE_CALL if preview_mode() == "critical" else TWO_CALLS
+        if model_tier() == "small" and preview_mode() != "critical":
+            d += " (Sending the same request again as your very next call also confirms a preview.)"
+    ex = EXAMPLES.get(tool.name)
+    if ex:
+        d += " Examples: " + " | ".join(ex)
+    return d
+
+
+# TPLINK_TOOLSET=core: the everyday tools only, for small local models (a shorter tool list in a small
+# context window, and no raw escape hatch).  Default: every tool.
+CORE_TOOLS = frozenset({"router_status", "wifi_set", "system", "clients", "dhcp_reservation", "access_control",
+                        "parental_control", "port_forwarding", "router_logs", "router_journal", "router_undo",
+                        "extender", "extender_set"})
+
+
+def offered(name: str) -> bool:
+    import os
+
+    from .safety import model_tier
+
+    toolset = os.environ.get("TPLINK_TOOLSET") or ("core" if model_tier() == "small" else "full")
+    return toolset.lower() != "core" or name in CORE_TOOLS
+
+
+SHORT_KEYS = ("memory", "about_device", "status", "tell_user", "next_call", "error", "hint", "verified", "applied", "journal_id", "undo_call",
+              "pending", "recent_changes", "router", "changed", "assumed", "refused")
+
+
+def shorten(out: dict[str, Any]) -> dict[str, Any]:
+    """small tier: what the model needs first; everything else nested under details."""
+    if not isinstance(out, dict) or "details" in out:
+        return out
+    head = {k: out[k] for k in SHORT_KEYS if k in out}
+    rest = {k: v for k, v in out.items() if k not in head}
+    return {**head, "details": rest} if rest and head.get("status") else out
 
 
 @dataclass
@@ -87,19 +174,257 @@ class Registry:
     routers: dict[str, Runtime]
 
     def get(self, name: str) -> Runtime:
+        name = self._generic(name)
         if name not in self.routers:
-            raise UsageError(f"unknown router {name!r}; configured: {sorted(self.routers)}")
+            raise UsageError(f"there is NO router named {name!r}. Tell the user it does not exist (configured: "
+                             f"{sorted(self.routers)}); do not answer with another router's data")
         return self.routers[name]
 
     def describe(self) -> list[dict[str, str]]:
         return [{"name": n, "host": r.host, "protocol": r.protocol, "kind": r.kind} for n, r in self.routers.items()]
+
+    # "the extender" / "my router" describe a KIND of device, not a name.  Bench: after the router argument began
+    # asking for any name the user gives, Gemma 12B sent router="the extender" for "turn on night mode on the
+    # extender".  When exactly one configured device is of that kind, the phrase means that device.
+    _KIND_WORDS = {"router": "router", "wifi router": "router", "main router": "router", "extender": "extender",
+                   "range extender": "extender", "repeater": "extender", "wifi extender": "extender"}
+
+    def _generic(self, name: str) -> str:
+        if name in self.routers:
+            return name
+        words = str(name).strip().lower().split()
+        while words and words[0] in ("the", "my", "our", "this"):
+            words = words[1:]
+        phrase = " ".join(words)
+        if phrase in ("device", "name", "default") and len(self.routers) == 1:
+            # Bench (Nemotron 4B): filled device="device" as a placeholder; with one device it can only mean that one
+            return next(iter(self.routers))
+        kind = self._KIND_WORDS.get(phrase)
+        if not kind:
+            return name
+        matches = [n for n, r in self.routers.items() if r.kind == kind]
+        return matches[0] if len(matches) == 1 else name
 
 
 NO_CALLBACK_HINT = ("router {r!r} does not have this form/operation - its firmware differs from the BE9300 "
                     "this server was built against. Try router_raw_read, or router_catalog for what to look for.")
 
 
+def _actions(tool: ToolDef) -> list[str]:
+    return list((tool.properties.get("action") or {}).get("enum") or [])
+
+
+def _infer_action(tool: ToolDef, args: dict[str, Any]) -> str | None:
+    """settings given but no action, on a tool whose default action only reads: the intent is "set".
+
+    Seen in the local-model bench: a 1-bit model left out action=set on every call and looped on reads.
+    """
+    if "action" in args or "settings" not in args or "set" not in _actions(tool):
+        return None
+    args["action"] = "set"
+    return "action=set (settings were given without an action)"
+
+
+_CALL_KEYS = ("apply", "confirm_token", "router", "reveal", "intent")
+READ_ACTIONS = frozenset({"get", "status", "list", "read", "show", "protocols", "leases", "owners", "candidates",
+                          "speed", "iot_status", "dns_privacy_servers", "traffic", "game_accelerator", "devices",
+                          "clients", "topology", "search_status", "uplink", "network", "wifi", "guest", "system",
+                          "report", "history", "partitions", "scan", "check"})
+
+
+def _error_status(name: str, args: dict[str, Any], out: Any) -> Any:
+    """A write tool's error must read as NOT DONE (or NOT CONFIRMED), never as a bare message.
+
+    Bench: Gemma 12B put the confirm_token inside settings, got a bare error back and told the user "the LEDs
+    have been turned off".  Errors raised before applying mean nothing was sent; an error while applying
+    means the device state is unknown.
+    """
+    tool = TOOLS.get(name)
+    if not (tool and not tool.read_only and isinstance(out, dict) and out.get("error") and "status" not in out):
+        return out
+    # A failed READ through a write-capable tool (internet action=status, wifi_set action=get, ...) changed
+    # nothing either, but "NOT DONE" would wrongly suggest a change was attempted.
+    wants_change = bool(args.get("apply") or args.get("confirm_token") or args.get("settings")
+                        or args.get("enable") is not None or args.get("bands") is not None
+                        or str(args.get("action", "")) not in READ_ACTIONS)
+    if not wants_change:
+        return out
+    err = str(out["error"])
+    if str(out.get("note", "")).startswith("not retried"):
+        return {"status": "UNKNOWN", "applied": None, "verified": "unknown",
+                "tell_user": "NOT CONFIRMED: something failed while applying, so the change may or may not have "
+                             "reached the device. Re-read the current values before telling the user anything.",
+                **out}
+    res: dict[str, Any] = {"status": "NOT_DONE", "applied": False, "verified": "no",
+                           "tell_user": f"NOT DONE - NOTHING CHANGED: {err}", **out}
+    nested = {k: v for k, v in (args.get("settings") or {}).items() if k in _CALL_KEYS} \
+        if isinstance(args.get("settings"), dict) else {}
+    if nested:
+        fixed = {k: v for k, v in args.items() if k != "settings"}
+        rest = {k: v for k, v in args["settings"].items() if k not in _CALL_KEYS}
+        if rest:
+            fixed["settings"] = rest
+        fixed.update(nested)
+        res["hint"] = (f"{', '.join(sorted(nested))} must be top-level arguments, not inside settings. "
+                       "Send next_call exactly.")
+        res["next_call"] = {"tool": name, "arguments": fixed}
+    return res
+
+
+def _next_call(tool: ToolDef, args: dict[str, Any]) -> dict[str, Any] | None:
+    """The exact call to make next, after a change request that only read."""
+    if "set" in _actions(tool) and args.get("action") in (None, "get") and "settings" in args:
+        nxt = {k: v for k, v in args.items() if k not in ("apply", "confirm_token")}
+        nxt["action"] = "set"
+        return {"tool": tool.name, "arguments": nxt, "then": "repeat with apply=true and the confirm_token it returns"}
+    return None
+
+
+# The tool's artificial memory, per router: the last change request and what ACTUALLY happened.  Local-model
+# bench: a model reasoned only on its first turn, then wrote its answer from its own plan without reading the
+# reply ("5 GHz turned off" after a refusal).  Small-tier replies START with this memory, in the model's voice.
+TASK_MEMORY: dict[str, dict[str, Any]] = {}
+
+
+def _outcome(out: dict[str, Any]) -> tuple[str, bool]:
+    st = out.get("status")
+    if st == "applied" and out.get("verified") == "yes":
+        return "DONE and verified on the device", True
+    if st == "applied":
+        return "sent, but not confirmed by reading the device back", False
+    if st in ("PREVIEW_ONLY", "ALREADY_PREVIEWED"):
+        return "NOT DONE YET - only previewed, nothing changed", False
+    if st == "REFUSED_NOTHING_CHANGED" or out.get("refused"):
+        return f"NOT DONE - refused ({out.get('refused')}), nothing changed", False
+    if st == "no_change" or out.get("no_change"):
+        return "nothing needed changing - it already had those values", True
+    if out.get("error"):
+        return f"NOT DONE - error: {str(out['error'])[:120]}", False
+    return f"NOT DONE - {st or 'unknown result'}", False
+
+
+def remember_task(router: str, tool: str, intent: Any, out: dict[str, Any]) -> None:
+    prev = TASK_MEMORY.get(router) or {}
+    task = str(intent) if intent else (out.get("summary") or prev.get("task") or tool)
+    if not intent and prev.get("intent") and time.time() - prev.get("at", 0) < RECENT_WINDOW and prev.get("tool") == tool:
+        task, intent = prev["task"], prev["intent"]  # same task continuing: keep the user's words
+    what, done = _outcome(out)
+    TASK_MEMORY[router] = {"task": task, "intent": intent, "tool": tool, "what": what, "done": done, "at": time.time()}
+
+
+def task_memory(router: str) -> dict[str, Any] | None:
+    m = TASK_MEMORY.get(router)
+    if not m or time.time() - m["at"] > RECENT_WINDOW:
+        return None
+    return {"you_were_asked_to": m["task"], "what_actually_happened": m["what"],
+            "is_it_done": "YES" if m["done"] else "NO",
+            "rule": "Tell the user exactly what_actually_happened. Never say it is done unless is_it_done is YES."}
+
+
 def run_tool(name: str, args: dict[str, Any] | None, reg: Registry | Runtime) -> dict[str, Any]:
+    """Run a tool call and record anything worth a look in the local event log (``events.py``)."""
+    out = _run_tool_with_memory(name, args, reg)
+    try:
+        from . import events
+
+        a = dict(args or {})
+        router = a.get("router") or a.get("device") or (reg.name if isinstance(reg, Runtime) else "main")
+        tool = TOOLS.get(name)
+        events.from_reply(name, a, out, str(router), bool(tool and tool.read_only))
+        from . import reporting
+
+        if reporting.is_enabled():
+            rt = reg.get(str(router)) if isinstance(reg, Registry) else reg
+            reporting.from_reply(name, out, events.device_info(rt.name, rt.host), rt.protocol, rt.kind)
+    except Exception:  # noqa: BLE001 - logging / reporting never breaks a tool call
+        pass
+    return out
+
+
+def _run_tool_with_memory(name: str, args: dict[str, Any] | None, reg: Registry | Runtime) -> dict[str, Any]:
+    """Run a tool call; every reply also carries the server's memory of previewed-but-unapplied changes."""
+    from .safety import model_tier, note_call
+
+    if args and "device" in args:  # 'device' is an alias of 'router' (models say "the extender called X")
+        args = dict(args)
+        dev = args.pop("device")
+        same = str(args.get("router")) == str(dev)
+        if not same:
+            regobj = reg if isinstance(reg, Registry) else Registry({reg.name: reg})
+            same = regobj._generic(str(args.get("router"))) == regobj._generic(str(dev))
+        if args.get("router") and dev and not same:
+            return {"error": f"router={args['router']!r} and device={dev!r} name different devices; pass one name"}
+        if dev and not args.get("router"):
+            args["router"] = dev
+    try:
+        note_call(reg.get((args or {}).get("router") or "main").name if isinstance(reg, Registry) else reg.name)
+    except Exception:  # noqa: BLE001 - unknown router: the tool reports it
+        pass
+    intent = (args or {}).get("intent")
+    out = _run_tool(name, args, reg)
+    small = model_tier() == "small"
+    out = _error_status(name, args or {}, out)
+    if isinstance(out, dict) and str(out.get("error", "")).startswith("there is NO router named"):
+        # Bench: told 'garage'/'attic' does not exist, 12B and Bonsai then read the main device and answered for it.
+        asked = (args or {}).get("router")
+        known = list(reg.routers) if isinstance(reg, Registry) else [reg.name]
+        out = {"status": "NO_SUCH_DEVICE",
+               "tell_user": f"There is no device named {asked!r} - the configured devices are: {', '.join(known)}. "
+                            "Tell the user exactly this; do not answer with another device's data.", **out}
+    try:
+        _router = reg.get((args or {}).get("router") or "main").name if isinstance(reg, Registry) else reg.name
+    except Exception:  # noqa: BLE001
+        _router = None
+    tool = TOOLS.get(name)
+    if _router and tool and not tool.read_only and isinstance(out, dict):
+        remember_task(_router, name, intent, out)
+    if (small and _router and tool and tool.read_only and isinstance(out, dict) and "error" not in out
+            and not (args or {}).get("router") and name not in ("router_journal", "router_undo")):
+        # Bench: asked about "the extender called attic", every model read the default device and reported its
+        # values as attic's.  Say plainly which device this answer is about.
+        out = {"about_device": f"{_router} (the default). If the user asked about a device by another name, this "
+                               f"answer is NOT about it: call again with router=\"<that name>\".", **out}
+    if small and _router and isinstance(out, dict):
+        mem = task_memory(_router)
+        if mem:
+            out = {"memory": mem, **out}
+    if not isinstance(out, dict) or out.get("status") in ("PREVIEW_ONLY", "ALREADY_PREVIEWED"):
+        return shorten(out) if small else out
+    try:
+        router = (reg.get((args or {}).get("router") or "main").name if isinstance(reg, Registry) else reg.name)
+    except Exception:  # noqa: BLE001 - unknown router: nothing to remind about
+        return out
+    from .safety import pending_for
+
+    if small:
+        rt_ = reg.get(router) if isinstance(reg, Registry) else reg
+        out["recent_changes"] = recent_changes(rt_.journal, router)
+    pend = pending_for(router, name)
+    if pend:
+        out["pending"] = {"note": "UNFINISHED with this tool: previewed but NOT applied. Apply it ONLY if the user's "
+                                  "current request asked for exactly this change (send its next_call); otherwise "
+                                  "ignore it - it expires in 5 minutes.", "changes": pend}
+    return shorten(out) if small else out
+
+
+RECENT_WINDOW = 600.0
+APPLIED = ("applied", "partial", "mismatch", "collateral")
+
+
+def recent_changes(journal: Journal, router: str) -> Any:
+    """small tier: what this server actually changed on ``router`` in the last 10 minutes - a fact on every
+    reply.  Local-model bench: models claimed changes they never made ("2.4 GHz turned back on") after
+    only reading; now the truth sits in front of them."""
+    now = time.time()
+    out = [{"change": e.get("summary"), "status": e.get("status"), "id": e.get("id"),
+            **({"undid": e["undo_of"]} if e.get("undo_of") else {})}
+           for e in journal.entries()
+           if e.get("router", "main") == router and now - float(e.get("ts") or 0) <= RECENT_WINDOW
+           and e.get("status") in APPLIED]
+    return out[-5:] if out else "none: this server made no changes on this router in the last 10 minutes"
+
+
+def _run_tool(name: str, args: dict[str, Any] | None, reg: Registry | Runtime) -> dict[str, Any]:
     """Run one tool call inside its own login/logout on the selected router.
 
     Retries once only for login failures and for ambiguous errors while PLANNING/READING
@@ -111,10 +436,14 @@ def run_tool(name: str, args: dict[str, Any] | None, reg: Registry | Runtime) ->
     tool = TOOLS.get(name)
     if tool is None:
         return {"error": f"unknown tool {name!r}"}
+    if not offered(name):
+        return {"error": f"{name} is not offered in this server's compact tool set (TPLINK_TOOLSET=core)",
+                "tools": sorted(n for n in TOOLS if offered(n))}
     args = dict(args or {})
     unknown = set(args) - set(tool.schema()["properties"])
     if unknown:
         return {"error": f"unknown argument(s) {sorted(unknown)} for {name}"}
+    assumed = _infer_action(tool, args)
     router = str(args.pop("router", "") or "")
     try:
         if name == "router_undo" and args.get("id"):
@@ -131,10 +460,15 @@ def run_tool(name: str, args: dict[str, Any] | None, reg: Registry | Runtime) ->
     if rt.kind not in tool.kinds:
         usable = sorted(n for n, t in TOOLS.items() if rt.kind in t.kinds)
         return {"error": f"{name} is not supported on {rt.name!r} ({rt.kind})", "tools_for_this_device": usable}
+    from . import capabilities  # unconditional: also used by the error path below
+
+    if (not tool.read_only or args.get("action")) and capabilities.known_absent(rt.name, rt.host, name, args):
+        return capabilities.not_supported(rt.name, rt.host, name, args, cached=True)
     last: RouterError | None = None
     for attempt in (1, 2):
         try:
             with session(rt.factory) as t:
+                _watch_firmware(t, rt)
                 ctx = Ctx(t, args, rt.journal, rt.host, rt.identity, router=rt.name, routers=reg.describe(),
                           kind=rt.kind)
                 result = tool.handler(ctx)
@@ -145,12 +479,59 @@ def run_tool(name: str, args: dict[str, Any] | None, reg: Registry | Runtime) ->
                     for step in result.steps:  # risk tiers are per router
                         step.risk = catalog.risk_of(step.url_path, step.op, rt.profile)
                     try:
-                        return finalize(t, result, args, rt.journal, rt.reopen)
+                        done = finalize(t, result, args, rt.journal, rt.reopen)
+                        if assumed:
+                            done["assumed"] = assumed
+                        if (done.get("applied") or done.get("status") in ("applied", "unknown", "partial")) and any(
+                                st.path == "system?form=sysmode" for st in result.steps):
+                            # an operation-mode switch changes which features exist: forget what was learned
+                            capabilities.forget_router(rt.name, rt.host)
+                            from . import events
+
+                            events._SEEN.pop(rt.name, None)  # re-read firmware + mode on the next call
+                        return done
                     except Exception as exc:  # noqa: BLE001 - never retry once applying started
                         logger.exception("apply failed")
                         return {"error": f"apply failed: {type(exc).__name__}: {redact(str(exc))}",
                                 "note": "not retried; check router_journal and re-read before trying again"}
-                return redact(result, bool(args.get("reveal")))
+                if args.get("apply") and not tool.read_only:
+                    # Asked to change something but the call only read (missing action=set, no settings, no
+                    # enable...).  Never let that look like success: a small model then reports "done".
+                    if isinstance(result, dict) and result.get("status") == "no_change":
+                        return redact({**result, "applied": False,
+                                       "note": "nothing to change: the device already has these values"},
+                                      bool(args.get("reveal")))
+                    out = {"applied": False, "changed": False,
+                           "error": "NOTHING WAS CHANGED: this call only read the current values.",
+                           "hint": f"to change something, call {name} with the change itself "
+                                   "(e.g. action=set plus settings={...}, or enable=true/false), first without "
+                                   "apply to see the plan, then with apply=true and its confirm_token",
+                           "current_values": redact(result, bool(args.get("reveal")))}
+                    nxt = _next_call(tool, args)
+                    if nxt and rt.name != "main":
+                        nxt["arguments"]["router"] = rt.name
+                    if nxt:
+                        out["next_call"] = nxt
+                    # Bench (Bonsai): previewed correctly, then sent apply + the token but dropped action=set.  The
+                    # token names exactly one previewed change: hand back its next_call instead of a guess.
+                    from .safety import pending_for
+                    # Match on the signature after the dot: models garble the timestamp digits (Gemma 12B sent
+                    # 1795350214.e8be... for 1795350220.e8be...).  This only hands back the right call; the token
+                    # check that guards applying is unchanged, so a garbled token still cannot apply anything.
+                    tok = str(args.get("confirm_token") or "")
+                    sig = tok.rsplit(".", 1)[-1] if "." in tok else tok
+                    prev = [pc for pc in pending_for(rt.name, name)
+                            if len(sig) >= 16 and str(pc["next_call"].get("arguments", {}).get("confirm_token", "")
+                                                      ).rsplit(".", 1)[-1] == sig]
+                    if len(prev) == 1:
+                        out["next_call"] = prev[0]["next_call"]
+                        out["hint"] = ("this call left out arguments of the change you previewed "
+                                       f"({prev[0]['change']}); send next_call exactly as given")
+                    return out
+                out = redact(result, bool(args.get("reveal")))
+                if assumed and isinstance(out, dict):
+                    out["assumed"] = assumed
+                return out
         except (UsageError, ValueError, TypeError) as exc:
             return {"error": str(exc)}
         except Conflict as exc:
@@ -165,15 +546,50 @@ def run_tool(name: str, args: dict[str, Any] | None, reg: Registry | Runtime) ->
     assert last is not None
     out: dict[str, Any] = {"error": last.code, "message": redact(last.message), "router": rt.name}
     unreachable = any(s in last.message for s in ("timed out", "ConnectTimeout", "Max retries exceeded",
-                                                   "Connection refused", "No route to host"))
+                                                   "Connection refused", "No route to host", "ConnectionError",
+                                                   "Connection aborted", "RemoteDisconnected"))
     if unreachable:
         out["hint"] = (f"{rt.name} did not answer at its configured address: it may be restarting, or its address "
                        "changed (e.g. after an operation mode switch); check the host setting for this device.")
     elif last.code == E_LOGIN or last.ambiguous:
         out["hint"] = ONE_SESSION_HINT
-    elif last.code == "no such callback":
-        out["hint"] = NO_CALLBACK_HINT.format(r=rt.name)
+    elif last.code == "no such callback" or "HTTP 404" in last.message:
+        capabilities.mark_absent(rt.name, rt.host, name, args, last.code)
+        return {**capabilities.not_supported(rt.name, rt.host, name, args), "router": rt.name,
+                "hint": NO_CALLBACK_HINT.format(r=rt.name)}
     return out
+
+
+def _watch_firmware(t: Any, rt: Runtime) -> None:
+    """First use of a device in this process, then every few hours: record its model / hardware / firmware.
+    A change is logged as firmware_changed (a cloud update changed a BE4800's login overnight)."""
+    from . import events
+
+    if not events.firmware_due(rt.name):
+        return
+    try:
+        fw = t.call("firmware?form=upgrade", "read")
+    except Exception:  # noqa: BLE001 - never let the watcher break the call it rides on
+        events._SEEN[rt.name] = time.time()
+        return
+    if isinstance(fw, dict):
+        try:  # operation mode keys the capability memory (router-only features vanish in AP mode)
+            sm = t.call("system?form=sysmode", "read")
+            if isinstance(sm, dict) and sm.get("mode"):
+                fw = {**fw, "mode": str(sm["mode"])}
+        except Exception:  # noqa: BLE001 - older firmware without the form: firmware alone
+            pass
+    change = events.note_firmware(rt.name, rt.host, fw if isinstance(fw, dict) else None)
+    if change:
+        from . import capabilities
+
+        capabilities.forget_router(rt.name, rt.host)
+    from . import reporting
+
+    if reporting.is_enabled() and isinstance(fw, dict):
+        reporting.submit(reporting.build("device_seen", device=fw, protocol=rt.protocol, kind=rt.kind))
+        if change:
+            reporting.submit(reporting.build("firmware_changed", device=fw, protocol=rt.protocol, kind=rt.kind))
 
 
 def _action(values: list[str], default: str | None = None, desc: str = "") -> dict[str, Any]:
@@ -192,8 +608,9 @@ def _register_all() -> None:
     register(ToolDef(
         "router_status",
         "Router overview: WAN/LAN addresses, internet state, Wi-Fi bands, client counts, CPU/memory, "
-        "firmware, VPN-client switch. On an extender: model, mode, uplink, mesh role. Read-only.",
-        core.router_status, read_only=True, kinds=("router", "extender")))
+        "firmware, VPN-client switch. On an extender: model, mode, uplink, mesh role. Read-only. "
+        "capabilities=true: which features this tool has found NOT supported on this router's firmware.",
+        core.router_status, {"capabilities": {"type": "boolean"}}, read_only=True, kinds=("router", "extender")))
     register(ToolDef(
         "router_get",
         "Read one section of the router config by friendly name (e.g. dhcp, dhcp_reservations, dhcp_leases, "
@@ -235,12 +652,13 @@ def _register_all() -> None:
         "swapped back). Refuses if the router changed since, unless force=true. Reboots/firmware/actions are "
         "not undoable. Dry run first like every write.",
         core.router_undo, {"id": {"type": "string"}, "force": {"type": "boolean", "default": False}},
-        required=["id"], kinds=("router", "extender")))
+        required=[], kinds=("router", "extender")))
     register(ToolDef(
         "router_raw_write",
-        "Escape hatch: send ANY operation + fields to a catalogued form. Risk comes from the catalog (unknown "
-        "ops are CRITICAL, so need a confirm_token). FORBIDDEN ops (factory reset, config restore, firmware "
-        "upload, quick setup, cloud bind) also need TPLINK_ALLOW_FORBIDDEN=1. Prefer the specific tools.",
+        "EXPERTS ONLY - last resort. Do NOT use this because another tool refused or asked for a dry run: "
+        "do that dry run and pass its confirm_token instead. Sends ANY operation + fields to a catalogued form "
+        "with no field checks. Risk comes from the catalog (unknown ops are CRITICAL). FORBIDDEN ops (factory "
+        "reset, config restore, firmware upload, quick setup, cloud bind) also need TPLINK_ALLOW_FORBIDDEN=1.",
         core.router_raw_write,
         {"path": {"type": "string"}, "operation": {"type": "string"},
          "fields": {"type": "object", "description": "request fields (strings; objects are JSON-encoded)"}},
@@ -504,10 +922,14 @@ def _register_phase8() -> None:
         "clients",
         "Connected devices. action=list | rename (mac, name: the name shown everywhere) | speed (limits/speeds) | "
         "speed_limit (mac, download_kbps, upload_kbps, enable) | game_accelerator | iot_status | iot_enable | "
-        "iot_disable | iot_add / iot_remove (mac or macs: move smart-home devices to the isolated IoT network).",
+        "iot_disable | iot_add / iot_remove (mac or macs: move smart-home devices to the isolated IoT network) | "
+        "traffic (client=name, IP or MAC, optional history=minute|hour|day: how much data a device used, from the "
+        "router's own traffic statistics; routers with a traffic monitor only).",
         clients.clients,
         {"action": _action(["list", "rename", "speed", "speed_limit", "game_accelerator", "iot_status",
-                            "iot_enable", "iot_disable", "iot_add", "iot_remove"], "list"),
+                            "iot_enable", "iot_disable", "iot_add", "iot_remove", "traffic"], "list"),
+         "client": {"type": "string", "description": "traffic: the device to look up (name, IP or MAC)"},
+         "history": {"type": "string", "enum": ["minute", "hour", "day"]},
          "mac": {"type": "string"}, "macs": {"type": "array", "items": {"type": "string"}},
          "name": {"type": "string"}, "download_kbps": {"type": "integer"}, "upload_kbps": {"type": "integer"},
          "enable": enable}))
@@ -558,13 +980,15 @@ def _register_extender() -> None:
         read_only=True, kinds=("extender",)))
     register(ToolDef(
         "extender_set",
-        "Change a range extender: action=led (enable) | led_night (enable, time_start, time_end) | "
-        "power_schedule (enable) | reboot. (Extended networks / high-speed mode: read them with extender; "
+        "Change a range extender: action=led (enable) | led_night (enable; time_start/time_end only if the user "
+        "gives times - otherwise the saved times are used) | "
+        "power_schedule (enable) | mlo (Wi-Fi 7 models: enable, bands=[\"2g\",\"5g\"]; no args = read) | reboot. (Extended networks / high-speed mode: read them with extender; "
         "writing them is not verified yet - use router_raw_write if needed.) No settings = show current values. Dry run "
         "first; critical changes need the confirm_token. Journaled and undoable (except reboot).",
         extender.extender_set,
-        {"action": _action(["led", "led_night", "power_schedule", "reboot"]),
-         "enable": {"type": "boolean"}, "settings": {"type": "object"}},
+        {"action": _action(["led", "led_night", "power_schedule", "mlo", "reboot"]),
+         "enable": {"type": "boolean"}, "settings": {"type": "object"},
+         "bands": {"type": "array", "items": {"type": "string", "enum": ["2g", "5g", "6g"]}}},
         required=["action"], kinds=("extender",)))
 
 

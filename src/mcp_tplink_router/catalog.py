@@ -450,6 +450,15 @@ _EXTRA: list[Endpoint] = [
         op_risk={"slave_get_info": READ, "slave_get_upgrade_info": READ, "slave_upgrade_firmware": CRITICAL},
         verified={"slave_get_info": "ui", "slave_get_upgrade_info": "ui", "slave_upgrade_firmware": "ui"}),
     # ---- clients / smart network ------------------------------------------------------
+    # Traffic statistics (Archer AX3000 / AXE5400 web UI, read live 2026-11-23).  traffic?form=data carries the
+    # history reads seg_list / seg_get AND reset_all, which WIPES all statistics although the UI sends it through
+    # its read proxy - so risk is per (form, op): reset_all is critical and no tool action sends it.
+    _ep("traffic?form=status", section="traffic_stats", read_op="read", write_fields=("enable",),
+        op_risk={"write": NORMAL}, verified={"read": "live", "write": "ui"}),
+    _ep("traffic?form=lists", section="traffic_stats", read_op="load", verified={"load": "live"}),
+    _ep("traffic?form=data", section="traffic_stats", kind="action",
+        op_risk={"seg_list": READ, "seg_get": READ, "reset_all": CRITICAL},
+        verified={"seg_list": "live", "seg_get": "live", "reset_all": "ui"}),
     _ep("traffic?form=dev_name", kind="action", op_risk={"write": NORMAL}, verified={"write": "ui"},
         note="write mac + alias renames a client everywhere in the UI."),
     _ep("smart_network?form=client_speed_limit", kind="action", read_op=None,
@@ -551,7 +560,11 @@ _EXTRA: list[Endpoint] = [
         note="Live: the router accepts the write but ignores it (reported as no_effect) for this login type."),
     # ---- range extenders (RE series; recorded from their web UIs, repeater mode) -----------------
     _ep("extend?form=settings", section="ext_extended", read_op="read",
-        write_fields=("enable_2g", "enable_5g", "ssid_2g", "ssid_5g", "hide_2g", "hide_5g"),
+        # The web UI's own save payload (RE3200BE fw 1.5.3): MLO fields + per band enable/ssid/hide/sec_follow/
+        # sec/password.  Fields a model lacks (no MLO on X-series) are simply not sent.
+        write_fields=("mlo_enable", "mlo_band2", "mlo_band5", "mlo_band6", "mlo_ssid", "mlo_encryption", "mlo_password",
+                      "enable_2g", "ssid_2g", "hide_2g", "sec_follow_2g", "sec_2g", "password_2g",
+                      "enable_5g", "ssid_5g", "hide_5g", "sec_follow_5g", "sec_5g", "password_5g"),
         secret_fields=("password_2g", "password_5g", "mlo_password"), op_risk={"write": CRITICAL},
         note="Extender: the networks it broadcasts. Critical: clients reconnect; mesh agents may be re-synced."),
     _ep("connect?form=settings", section="ext_uplink", read_op="read", secret_fields=("password_2g", "password_5g"),
@@ -600,6 +613,7 @@ LIVE_VERIFIED: dict[str, tuple[str, ...]] = {
     "administration?form=local": ("insert", "remove"), "administration?form=remote": ("write",),
     "administration?form=account": ("write",), "imb?form=bind_list": ("insert", "remove"),
     "system?form=sysmode": ("write",),  # BE3600: router -> ap -> router, both directions
+    "extend?form=settings": ("write",),  # RE3200BE fw 1.5.3: MLO network off -> verified -> undo (2026-11-20)
     "dhcps?form=reservation": ("insert", "update", "remove"), "firmware?form=config_multipart": ("backup", "restore"),
     "diag?form=diag": ("start", "continue", "stop"), "access_control?form=white_list": ("insert", "remove"),
     "vpn?form=vpn_user_list": ("update",),

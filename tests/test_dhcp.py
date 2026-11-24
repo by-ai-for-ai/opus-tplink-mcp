@@ -7,6 +7,7 @@ import json
 from mcp_tplink_router.netcalc import lan_from
 from mcp_tplink_router.validate import validate_dhcp_setting, validate_reservation
 
+from .conftest import send
 from .fake_router import DESKTOP_MAC, PHONE_MAC, TABLET_MAC
 
 RESV = "dhcps?form=reservation"
@@ -78,7 +79,7 @@ def test_list_reservations_annotated(call) -> None:  # type: ignore[no-untyped-d
 
 def test_add_dry_run_sends_nothing(call, fake) -> None:  # type: ignore[no-untyped-def]
     out = call("dhcp_reservation", action="add", mac="02:00:00:00:00:01", ip="192.168.0.250", name="sentinel")
-    assert out["dry_run"] is True and out["risk"] == "normal" and "confirm_token" not in out
+    assert out["dry_run"] is True and out["risk"] == "normal" and out["confirm_token"]  # every change needs a token
     assert any("use device MAC" in w for w in out["warnings"])  # 02- is locally administered
     assert out["diff"][0]["add_row"] == {"mac": "02-00-00-00-00-01", "ip": "192.168.0.250",
                                          "comment": "sentinel", "enable": "on"}
@@ -86,7 +87,7 @@ def test_add_dry_run_sends_nothing(call, fake) -> None:  # type: ignore[no-untyp
 
 
 def test_add_apply_wire_format_and_journal(call, fake, rt) -> None:  # type: ignore[no-untyped-def]
-    out = call("dhcp_reservation", action="add", mac="02:00:00:00:00:01", ip="192.168.0.250", apply=True)
+    out = send(call, "dhcp_reservation", action="add", mac="02:00:00:00:00:01", ip="192.168.0.250")
     assert out["status"] == "applied" and out["verify"][0]["applied"] is True
     (path, op, fields), = fake.writes()
     assert (path, op) == (RESV, "insert")
@@ -98,14 +99,14 @@ def test_add_apply_wire_format_and_journal(call, fake, rt) -> None:  # type: ign
 
 
 def test_add_rejects_conflicting_ip(call, fake) -> None:  # type: ignore[no-untyped-def]
-    out = call("dhcp_reservation", action="add", mac="AA-BB-CC-DD-EE-01", ip="192.168.0.157", apply=True)
+    out = send(call, "dhcp_reservation", action="add", mac="AA-BB-CC-DD-EE-01", ip="192.168.0.157")
     assert out["applied"] is False and out["errors"] and fake.writes() == []
 
 
 def test_remove_uses_fresh_index_and_verifies(call, fake) -> None:  # type: ignore[no-untyped-def]
     fake.state[RESV].insert(0, {"mac": "AA-BB-CC-DD-EE-01", "ip": "192.168.0.200", "comment": "x",
                                 "hostname": "", "enable": "on"})
-    out = call("dhcp_reservation", action="remove", mac=TABLET_MAC.lower().replace("-", ":"), apply=True)
+    out = send(call, "dhcp_reservation", action="remove", mac=TABLET_MAC.lower().replace("-", ":"))
     assert out["status"] == "applied"
     (path, op, fields), = fake.writes()
     assert op == "remove" and fields["index"] == "1"
@@ -113,7 +114,7 @@ def test_remove_uses_fresh_index_and_verifies(call, fake) -> None:  # type: igno
 
 
 def test_update_sends_old_and_new(call, fake) -> None:  # type: ignore[no-untyped-def]
-    out = call("dhcp_reservation", action="update", mac=TABLET_MAC, ip="192.168.0.158", apply=True)
+    out = send(call, "dhcp_reservation", action="update", mac=TABLET_MAC, ip="192.168.0.158")
     assert out["status"] == "applied"
     (_, op, fields), = fake.writes()
     assert op == "update"
@@ -123,7 +124,7 @@ def test_update_sends_old_and_new(call, fake) -> None:  # type: ignore[no-untype
 
 
 def test_reserve_current_by_hostname(call, fake) -> None:  # type: ignore[no-untyped-def]
-    out = call("dhcp_reservation", action="reserve_current", client="desktop", name="desk", apply=True)
+    out = send(call, "dhcp_reservation", action="reserve_current", client="desktop", name="desk")
     assert out["status"] == "applied"
     assert {"mac": DESKTOP_MAC, "ip": "192.168.0.160"}.items() <= fake.state[RESV][-1].items()
 
@@ -134,11 +135,11 @@ def test_conflict_if_row_changed_between_plan_and_send(call, fake) -> None:  # t
     def hook(path, op, fields):  # type: ignore[no-untyped-def]
         if path == RESV and op == "load":
             loads["n"] += 1
-            if loads["n"] == 2:  # the pre-send re-load: the owner edited the row meanwhile
+            if loads["n"] == 3:  # dry run, plan, then the pre-send re-load: the owner edited the row meanwhile
                 fake.state[RESV][0]["comment"] = "edited elsewhere"
 
     fake.on_call = hook
-    out = call("dhcp_reservation", action="remove", mac=TABLET_MAC, apply=True)
+    out = send(call, "dhcp_reservation", action="remove", mac=TABLET_MAC)
     assert out["status"] == "failed" and "changed since" in out["error"]
     assert not [w for w in fake.writes() if w[1] == "remove"]
 
@@ -156,16 +157,16 @@ def _fail_on(fake, op, *, after_apply):  # type: ignore[no-untyped-def]
 
 def test_ambiguous_write_applied_is_reread_not_resent(call, fake, rt) -> None:  # type: ignore[no-untyped-def]
     _fail_on(fake, "insert", after_apply=True)
-    out = call("dhcp_reservation", action="add", mac="AA-BB-CC-DD-EE-01", ip="192.168.0.201", apply=True)
+    out = send(call, "dhcp_reservation", action="add", mac="AA-BB-CC-DD-EE-01", ip="192.168.0.201")
     assert out["status"] == "applied", out
     assert len([c for c in fake.calls if c[1] == "insert"]) == 1, "an ambiguous write must never be resent"
-    assert fake.logins == 2  # re-logged in to re-read
+    assert fake.logins == 3  # dry run, apply, then re-logged in to re-read
     assert rt.journal.get(out["journal_id"])["status"] == "applied"
 
 
 def test_ambiguous_write_not_applied_reports_failed(call, fake, rt) -> None:  # type: ignore[no-untyped-def]
     _fail_on(fake, "insert", after_apply=False)
-    out = call("dhcp_reservation", action="add", mac="AA-BB-CC-DD-EE-01", ip="192.168.0.201", apply=True)
+    out = send(call, "dhcp_reservation", action="add", mac="AA-BB-CC-DD-EE-01", ip="192.168.0.201")
     assert out["status"] == "failed" and out["steps_applied"] == 0
     assert len([c for c in fake.calls if c[1] == "insert"]) == 1
     assert rt.journal.get(out["journal_id"])["status"] == "failed"
@@ -179,7 +180,8 @@ def test_dhcp_server_set_validation_and_critical(call, fake) -> None:  # type: i
     off = call("dhcp_server_set", enable=False)
     assert off["risk"] == "critical" and off["confirm_token"]
     refused = call("dhcp_server_set", enable=False, apply=True)
-    assert refused["applied"] is False and "CRITICAL" in refused["refused"]
+    assert refused["applied"] is False and "dry run first" in refused["refused"]
+    assert refused["dry_run"] and refused["confirm_token"]  # the refusal carries the plan and a fresh token
     assert fake.writes() == []
     done = call("dhcp_server_set", enable=False, apply=True, confirm_token=off["confirm_token"])
     assert done["status"] == "applied"
@@ -196,7 +198,7 @@ def test_confirm_token_bound_to_state(call, fake) -> None:  # type: ignore[no-un
 
 
 def test_no_change_is_reported(call, fake) -> None:  # type: ignore[no-untyped-def]
-    out = call("dhcp_server_set", lease_minutes=120, apply=True)
+    out = send(call, "dhcp_server_set", lease_minutes=120)
     assert out["no_change"] is True and fake.writes() == []
 
 
@@ -227,7 +229,7 @@ def test_wrong_row_removed_is_flagged_and_undo_restores_it(call, apply, fake, rt
     """If the router ever interpreted 'index' differently, the kiosk tablet's row must not vanish silently."""
     apply("dhcp_reservation", action="add", mac="02-00-00-00-00-01", ip="192.168.0.250")
     fake.index_offset = -1  # the router removes the row BEFORE the one we asked for (the tablet)
-    out = call("dhcp_reservation", action="remove", mac="02-00-00-00-00-01", apply=True)
+    out = send(call, "dhcp_reservation", action="remove", mac="02-00-00-00-00-01")
     fake.index_offset = 0
     assert out["status"] == "collateral", out
     assert out["collateral"]["missing"][0]["mac"] == TABLET_MAC
@@ -253,12 +255,36 @@ def test_reservation_name_note(call) -> None:  # type: ignore[no-untyped-def]
 
 def test_router_ignoring_a_write_reports_no_effect(call, fake, rt) -> None:  # type: ignore[no-untyped-def]
     fake.ignore_changes.add("dhcps?form=setting")
-    out = call("dhcp_server_set", lease_minutes=240, apply=True)
+    out = send(call, "dhcp_server_set", lease_minutes=240)
     assert out["status"] == "no_effect" and "NO EFFECT" in out["warning"]
     assert rt.journal.get(out["journal_id"])["status"] == "no_effect"
 
 
 def test_router_ignoring_an_update_reports_no_effect(call, fake) -> None:  # type: ignore[no-untyped-def]
     fake.ignore_changes.add(RESV)
-    out = call("dhcp_reservation", action="update", mac=TABLET_MAC, ip="192.168.0.158", apply=True)
+    out = send(call, "dhcp_reservation", action="update", mac=TABLET_MAC, ip="192.168.0.158")
     assert out["status"] == "no_effect"
+
+
+def test_every_change_reports_a_plain_verdict(call, fake) -> None:  # type: ignore[no-untyped-def]
+    ok = send(call, "dhcp_server_set", lease_minutes=240)
+    assert ok["verified"] == "yes" and ok["tell_user"].startswith("DONE AND VERIFIED")
+    fake.ignore_changes.add("dhcps?form=setting")
+    ign = send(call, "dhcp_server_set", lease_minutes=300)
+    assert ign["verified"] == "no" and ign["tell_user"].startswith("NOT DONE") and ign["applied"] is False
+
+
+def test_a_reread_that_disagrees_is_a_mismatch_not_applied(call, fake, rt) -> None:  # type: ignore[no-untyped-def]
+    wrote = {"done": False}
+
+    def hook(path, op, fields):  # type: ignore[no-untyped-def]
+        if path == "dhcps?form=setting" and op == "write":
+            wrote["done"] = True
+        elif path == "dhcps?form=setting" and op == "read" and wrote["done"]:
+            fake.state["dhcps?form=setting"]["leasetime"] = "999"  # the router stored something else
+
+    fake.on_call = hook
+    out = send(call, "dhcp_server_set", lease_minutes=240)
+    assert out["status"] == "mismatch" and out["applied"] is False and out["verified"] == "no"
+    assert "NOT DONE" in out["tell_user"] and "999" in out["tell_user"]
+    assert rt.journal.get(out["journal_id"])["status"] == "mismatch"
