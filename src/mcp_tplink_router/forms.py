@@ -227,6 +227,13 @@ def plan_write(path: str, current: dict[str, Any], changes: dict[str, Any], *, l
         raise ValueError(f"not supported by this tool on this router: its {path} form has no field(s) {absent} "
                          "(the model or firmware differs from what this tool was verified on). Nothing was sent; "
                          "the setting may exist under another name in the router's own web page.")
+    # LM Studio (Bonsai 27B): settings={"isolate": false} reached the router as the text "False" (isolate was not
+    # in wifi_set's on/off list); the router stored "off", the re-read was reported as a mismatch ("NOT DONE") and
+    # the model told the user it was done and verified.  Convert true/false to the form's vocabulary here, for
+    # every tool, from the field's CURRENT value.
+    from .features import boolish
+
+    changes = {k: boolish(current.get(k), v) for k, v in changes.items()}
     changed = {k: v for k, v in changes.items() if cmp_value(current.get(k)) != cmp_value(v)}
     if not changed:
         return None

@@ -13,9 +13,12 @@ aggregates.  Privacy rules (see the client's reporting.py and NOTICE):
 Fake reports cannot make a router "supported" (the client is open source, so anyone CAN send reports):
   * reports only ever produce "seen in the field (unverified)" counts; "verified" comes solely from
     DATA_DIR/verified.json, which only the maintainer writes (from bench / live apply-verify-undo results)
-  * each source counts once per model/firmware/code per day: a pseudonymous source id is an HMAC of the
-    sender's IP under a random salt that lives in memory only and changes every day (never written to disk,
-    so ids cannot be linked across days or turned back into an IP); repeats are accepted silently but ignored
+  * each source counts once per model/hardware/firmware/code/category per MONTH: the stored marker is an HMAC of
+    the sender's network (/24 or /48) + that report's key, under a random salt kept in memory only and replaced
+    every month.  One machine reporting on many days is one source; one installation's different reports get
+    different markers, so they cannot be joined; markers cannot be turned back into an IP once the month's salt
+    is gone (never written to disk).  Totals are the busiest single month.  A restart starts a new salt, so a
+    source may count twice in the month of a restart.  The IP itself is never stored or logged.
   * public totals need MIN_COUNT DISTINCT sources, not MIN_COUNT reports
   * model / hardware / firmware strings must look like TP-Link ones; implausible reports are dropped
   * per-source limits per minute and per day (memory only)
@@ -28,6 +31,8 @@ Endpoints
   GET  /errors     error groups (code, category, model, firmware, tool version)
   GET  /feed       PRIVATE (x-monitor-token): every group, project-monitor "monitor feed v1" format
   GET  /about      what is stored and why (plain text)
+  POST /known-devices   one device identity: {oui, model, kind} (see known_devices_db.py); 204
+  GET  /known-devices.json  the published identity table (entries seen on >= KD_MIN_NETWORKS networks)
   GET  /healthz
 
 Env: PORT (8790), HOST (127.0.0.1), DATA_DIR (./data), OTM_KEY (required), MIN_COUNT (5), RAW_DAYS (90),
@@ -91,6 +96,13 @@ FIELDS: dict[str, Any] = {
 _lock = threading.Lock()
 _hits: dict[str, deque[float]] = defaultdict(deque)
 
+import sys  # noqa: E402 - the known-device table lives next to this file
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import known_devices_db  # noqa: E402
+
+KD = known_devices_db.Store(DATA)
+
 
 def plausible(rec: dict[str, Any]) -> bool:
     """Device strings must look like TP-Link ones (they come from the router, so a real client always passes)."""
@@ -127,6 +139,25 @@ def source_id(ip: str) -> str:
             _seen_today.clear()
             _per_source.clear()
         return hmac.new(_salt["key"], ip.encode(), hashlib.sha256).hexdigest()[:16]
+
+
+_month_salt = {"month": "", "key": b""}
+
+
+def entry_marker(ip: str, rec: dict[str, Any]) -> str:
+    """The marker stored with a report: HMAC(month secret, sender network + THIS report's key).
+
+    Counted per month, so one machine reporting on many days is one source (the per-day id let one machine count
+    as N sources over N days).  Built from the report's own key, so one installation's reports cannot be joined
+    to each other; the secret lives in memory only and changes monthly.  Network = /24 (IPv4) or /48 (IPv6).
+    """
+    month = time.strftime("%Y-%m", time.gmtime())
+    net = known_devices_db.network_of(ip)
+    key = "|".join(str(rec.get(x) or "") for x in ("code", "model", "hardware", "firmware", "category"))
+    with _lock:
+        if _month_salt["month"] != month:
+            _month_salt.update(month=month, key=secrets.token_bytes(32))
+        return hmac.new(_month_salt["key"], f"{net}|{key}".encode(), hashlib.sha256).hexdigest()[:16]
 
 
 def admit(rec: dict[str, Any], src: str) -> bool:
@@ -188,7 +219,7 @@ def grouped(keys: tuple[str, ...], only: set[str] | None = None, exclude: set[st
     """Totals per group; published only when MIN_COUNT DISTINCT sources reported it (not MIN_COUNT reports)."""
     need = MIN_COUNT if min_sources is None else min_sources
     g: dict[tuple, dict[str, Any]] = {}
-    srcs: dict[tuple, set[str]] = defaultdict(set)
+    srcs: dict[tuple, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     for r in rows():
         if only and r.get("code") not in only or exclude and r.get("code") in exclude:
             continue
@@ -197,10 +228,12 @@ def grouped(keys: tuple[str, ...], only: set[str] | None = None, exclude: set[st
         e["count"] += 1
         e["last_day"] = max(e["last_day"], r.get("day", ""))
         e["first_day"] = min(e["first_day"] or r.get("day", ""), r.get("day", "") or e["first_day"])
-        srcs[k].add(str(r.get("src") or r.get("day")))  # folded rows lost their src: one per day
+        # markers are per month: a source counts once per month; the total is the busiest month, so one machine
+        # reporting every month never adds up to several sources
+        srcs[k][str(r.get("day", ""))[:7]].add(str(r.get("src") or r.get("day")))
     out = []
     for k, e in g.items():
-        e["sources"] = len(srcs[k])
+        e["sources"] = max((len(v) for v in srcs[k].values()), default=0)
         if e["sources"] >= need:
             out.append(e)
     return sorted(out, key=lambda e: -e["sources"])
@@ -289,6 +322,8 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {"note": "Field reports can be faked (the client is open source), so they never "
                                              "mark a router supported: 'verified' comes only from the maintainer's "
                                              "own tests.", "devices": seen})
+        if p == "/known-devices.json":
+            return self._send(200, KD.published())
         if p == "/feed":
             tok = (self.headers.get("x-monitor-token") or "").encode()
             if not MONITOR_TOKENS or not any(hmac.compare_digest(tok, t) for t in MONITOR_TOKENS):
@@ -300,7 +335,8 @@ class H(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path.rstrip("/") not in ("/report", ""):
+        path = self.path.rstrip("/")
+        if path not in ("/report", "", "/known-devices"):
             return self._send(404, {"error": "not found"})
         ip = self.headers.get("x-forwarded-for", self.client_address[0]).split(",")[0].strip()
         now = time.time()
@@ -321,12 +357,22 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n))
         except ValueError:
             return self._send(400, {"error": "json"})
+        if path == "/known-devices":
+            kd = known_devices_db.clean(body) if isinstance(body, dict) else None
+            if kd is None:
+                return self._send(400, {"error": "fields"})
+            src = source_id(ip)
+            with _lock:
+                over = _per_source[src] >= DAILY_PER_SOURCE
+                _per_source[src] += 1
+            if not over:
+                KD.add(kd, ip)  # counted once per network per entry per month; the IP is not kept
+            return self._send(204)
         rec = clean(body) if isinstance(body, dict) else None
         if rec is None:
             return self._send(400, {"error": "fields"})
-        src = source_id(ip)
-        if admit(rec, src):  # repeats from the same source are accepted silently but not counted
-            rec["src"] = src
+        if admit(rec, source_id(ip)):  # repeats from the same source are accepted silently but not counted
+            rec["src"] = entry_marker(ip, rec)
             store(rec)
         return self._send(204)
 

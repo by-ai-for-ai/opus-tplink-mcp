@@ -229,7 +229,17 @@ _CALL_KEYS = ("apply", "confirm_token", "router", "reveal", "intent")
 READ_ACTIONS = frozenset({"get", "status", "list", "read", "show", "protocols", "leases", "owners", "candidates",
                           "speed", "iot_status", "dns_privacy_servers", "traffic", "game_accelerator", "devices",
                           "clients", "topology", "search_status", "uplink", "network", "wifi", "guest", "system",
-                          "report", "history", "partitions", "scan", "check"})
+                          "report", "history", "partitions", "scan", "check", "info", "connection_status",
+                          "firmware_status", "firmware_check", "wps_status", "block_history", "today_sites",
+                          "connected", "backups", "browse", "allowed_sites_get", "filter_get", "device_detail",
+                          "modem_isps", "accounts", "profiles", "identify"})
+_CHANGE_MARKS = ("status", "applied", "refused", "no_change", "dry_run", "confirm_token", "journal_id", "error")
+
+
+def _wants_change(args: dict[str, Any]) -> bool:
+    return bool(args.get("apply") or args.get("confirm_token") or args.get("settings")
+                or args.get("enable") is not None or args.get("bands") is not None
+                or str(args.get("action", "")) not in READ_ACTIONS)
 
 
 def _error_status(name: str, args: dict[str, Any], out: Any) -> Any:
@@ -244,10 +254,7 @@ def _error_status(name: str, args: dict[str, Any], out: Any) -> Any:
         return out
     # A failed READ through a write-capable tool (internet action=status, wifi_set action=get, ...) changed
     # nothing either, but "NOT DONE" would wrongly suggest a change was attempted.
-    wants_change = bool(args.get("apply") or args.get("confirm_token") or args.get("settings")
-                        or args.get("enable") is not None or args.get("bands") is not None
-                        or str(args.get("action", "")) not in READ_ACTIONS)
-    if not wants_change:
+    if not _wants_change(args):
         return out
     err = str(out["error"])
     if str(out.get("note", "")).startswith("not retried"):
@@ -300,6 +307,8 @@ def _outcome(out: dict[str, Any]) -> tuple[str, bool]:
         return "nothing needed changing - it already had those values", True
     if out.get("error"):
         return f"NOT DONE - error: {str(out['error'])[:120]}", False
+    if out.get("errors") and not out.get("applied"):  # a plan refused before sending (e.g. router_undo drift)
+        return f"NOT DONE - refused, nothing changed: {str(out['errors'][0])[:120]}", False
     return f"NOT DONE - {st or 'unknown result'}", False
 
 
@@ -376,7 +385,10 @@ def _run_tool_with_memory(name: str, args: dict[str, Any] | None, reg: Registry 
     except Exception:  # noqa: BLE001
         _router = None
     tool = TOOLS.get(name)
-    if _router and tool and not tool.read_only and isinstance(out, dict):
+    if _router and tool and not tool.read_only and isinstance(out, dict) and _wants_change(args or {}) \
+            and any(k in out for k in _CHANGE_MARKS):
+        # LM Studio (Bonsai 27B): 'wifi_set action=get' was remembered as "you were asked to wifi_set - NOT DONE -
+        # unknown result", and every later reply carried that false NOT DONE.  Only change requests are tasks.
         remember_task(_router, name, intent, out)
     if (small and _router and tool and tool.read_only and isinstance(out, dict) and "error" not in out
             and not (args or {}).get("router") and name not in ("router_journal", "router_undo")):
@@ -920,18 +932,20 @@ def _register_phase8() -> None:
          "settings": settings, "enable": enable}))
     register(ToolDef(
         "clients",
-        "Connected devices. action=list | rename (mac, name: the name shown everywhere) | speed (limits/speeds) | "
+        "Connected devices. action=list (each device's maker and type; optional client=name, IP or MAC: only that device) | identify (also asks the devices themselves over mDNS who they are: hostname, services, model; takes ~3 s; optional client=) | label (mac or client=, name / owner / note: your own label, saved ONLY on this computer, encrypted; the router is not changed) | forget (mac or client=: delete that saved label) | rename (mac, name: the name shown everywhere) | speed (limits/speeds) | "
         "speed_limit (mac, download_kbps, upload_kbps, enable) | game_accelerator | iot_status | iot_enable | "
         "iot_disable | iot_add / iot_remove (mac or macs: move smart-home devices to the isolated IoT network) | "
-        "traffic (client=name, IP or MAC, optional history=minute|hour|day: how much data a device used, from the "
-        "router's own traffic statistics; routers with a traffic monitor only).",
+        "traffic (no client: which devices are using the most bandwidth RIGHT NOW, ranked, in one call - use this "
+        "for 'the network is slow'; client=name, IP or MAC: one device, optional history=minute|hour|day for how much "
+        "it used; from the router's own traffic statistics; routers with a traffic monitor only).",
         clients.clients,
-        {"action": _action(["list", "rename", "speed", "speed_limit", "game_accelerator", "iot_status",
+        {"action": _action(["list", "identify", "label", "forget", "rename", "speed", "speed_limit", "game_accelerator", "iot_status",
                             "iot_enable", "iot_disable", "iot_add", "iot_remove", "traffic"], "list"),
-         "client": {"type": "string", "description": "traffic: the device to look up (name, IP or MAC)"},
+         "client": {"type": "string", "description": "list / traffic: one device to look up (name, IP or MAC); traffic without it ranks all devices by current use"},
          "history": {"type": "string", "enum": ["minute", "hour", "day"]},
          "mac": {"type": "string"}, "macs": {"type": "array", "items": {"type": "string"}},
-         "name": {"type": "string"}, "download_kbps": {"type": "integer"}, "upload_kbps": {"type": "integer"},
+         "name": {"type": "string"}, "owner": {"type": "string"}, "note": {"type": "string"},
+         "download_kbps": {"type": "integer"}, "upload_kbps": {"type": "integer"},
          "enable": enable}))
     register(ToolDef(
         "usb",

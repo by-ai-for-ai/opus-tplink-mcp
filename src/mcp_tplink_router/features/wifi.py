@@ -110,6 +110,12 @@ def wifi_set(ctx: Ctx) -> Plan | dict[str, Any]:
 def _elsewhere(keys: list[str]) -> str:
     from .hints import guess_tool
 
+    if {"isolate", "access", "isolation"} & set(keys):
+        # LM Studio (Bonsai 27B): tried band=guest settings={"isolate": false} twice, then access_control, the
+        # journal and system info before finding band=guest_access.
+        return ('. Guest isolation is band=guest_access: {"action": "set", "band": "guest_access", '
+                '"settings": {"isolate": "off"}} (or "on")')
+
     tool = next((guess_tool(k) for k in keys if guess_tool(k) and not guess_tool(k).startswith("wifi_set")), None)
     return f". For that, use the tool: {tool}" if tool else ""
 

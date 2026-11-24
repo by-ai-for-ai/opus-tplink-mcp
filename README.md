@@ -171,6 +171,42 @@ repeated failures.
 * **Restarts are reported, not hidden:** a change that restarts a device's Wi-Fi (MLO on the RE3200BE) is
   warned about in the preview; afterwards the tool waits for the device and reports what came back.
 
+## What is that device?
+
+`clients action=list` answers the question most people have about their network: **what is that device with a
+generic name?** Each device comes back with its maker (from IEEE's public registry, shipped with the tool -
+nothing is looked up online), the router's own type guess, and the other MACs the router has seen under the same
+name. Phones and laptops with private Wi-Fi addresses change their MAC but usually keep their name, so that list
+is how one is recognised; when an earlier address was a real one, its maker is shown too.
+
+`clients action=identify` goes one step further and asks the devices themselves over mDNS / DNS-SD (about three
+seconds, only when called): TVs, printers, speakers and hubs announce hostnames, services and often their model.
+What a device announces is its own claim - the tool cleans it and labels it as data.
+
+Your own labels (`clients action=label`, `client=` or `mac=`, `name` / `owner` / `note`) are kept in a **private
+device record** on this computer only, encrypted, with first/last seen and a `new_on_network` flag. It is never
+uploaded. `TPLINK_KNOWN_DEVICES=off` turns it off; `opus-tplink-mcp devices wipe` deletes it (even a damaged one);
+`opus-tplink-mcp devices status` shows where it is.
+
+### Shared device names (off unless you choose)
+
+`opus-tplink-mcp devices sharing` asks a person (not an AI) to pick **off** (default), **receive** or **share**:
+
+- **receive** - uses one public table: model names that devices announced about themselves, by maker prefix, seen
+  on at least 3 different networks. It ships with each release (no request at all) and is refreshed about once a
+  week. It is matched on your computer; no question about your devices ever leaves it.
+- **share** - also sends, for each device that announced its model, exactly three things: the maker prefix (the
+  first half of a non-private MAC), that model name, and the router's type guess. Never a full MAC, an IP, a
+  hostname, a name you or the router gave it, or your private record. One device per request; the server counts
+  each entry with a marker derived from that entry alone, so it cannot join a household's devices together.
+  Every payload is logged (`opus-tplink-mcp devices sent`). `TPLINK_DEVICE_SHARING=off` forces it off.
+
+The service is `kd.by-ai-for-ai.com`, deliberately **not behind a CDN**: the connection is encrypted to the
+maintainer's server and nobody in between can read it. That server sees your IP while it answers and does not
+keep it (no access log); an IP that floods it is logged for up to a day and banned for 15 minutes. The deployed
+configuration is in [`docs/server/`](docs/server/) so you can check this. If you do not want even that server to
+see your IP, leave sharing off - receive works without it.
+
 ## Watching the server
 
 Everything worth a look is written to a local event log, `events.jsonl` next to the journal (0600, secrets
@@ -294,6 +330,8 @@ The server reads the first of: the file named by `TPLINK_ENV_FILE`, `~/.config/o
 | `TPLINK_EVENTS_FILE` | `<journal>/events.jsonl` | Local event log followed by `watch` / `viewer` |
 | `TPLINK_REPORTING` | (unset) | `off` forces field reports off. It cannot turn them on: that takes `opus-tplink-mcp setup` or the viewer |
 | `TPLINK_SETTLE_SECONDS` | `90` | How long to wait for a device whose Wi-Fi restarts after a change (MLO) |
+| `TPLINK_DEVICE_SHARING` | (unset) | `off` forces shared device names off. It cannot turn them on: that takes `opus-tplink-mcp devices sharing` |
+| `TPLINK_KNOWN_DEVICES` | `on` | `off` switches off the private device record (your labels, owners, first/last seen, earlier MACs): nothing is saved or read. It is kept only on this computer, encrypted (`known-devices.enc` next to the journal, key derived from the journal key) and never uploaded |
 | `TPLINK_JOURNAL_KEY` | `~/.config/opus-tplink-mcp/journal.key` | Key that encrypts the journal at rest (created on first use, 0600). Keep it: without it, old changes cannot be undone automatically |
 | `TPLINK_BACKUP_DIR` | `<journal>/backups` | Where `maintenance action=backup` saves config files (mode 600) |
 | `TPLINK_DEVICE_LOG_DIR` | `<journal>/device-logs` | Per-MAC histories written by `device_log action=record` |

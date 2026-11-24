@@ -1,0 +1,8 @@
+[kd-limit]
+enabled  = true
+port     = 80,443
+filter   = kd-limit
+logpath  = /var/log/nginx-kd/limit.log
+maxretry = 5
+findtime = 600
+bantime  = 900

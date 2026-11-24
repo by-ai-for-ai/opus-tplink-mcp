@@ -142,7 +142,7 @@ def load_env_file(environ: dict[str, str] | None = None) -> Path | None:
 
 def main() -> None:
     # Subcommands for people; no argument = the MCP stdio server (what AI clients launch).
-    if len(sys.argv) > 1 and sys.argv[1] in ("watch", "viewer", "setup", "report"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("watch", "viewer", "setup", "report", "devices"):
         cmd, rest = sys.argv[1], sys.argv[2:]
         load_env_file()
         if cmd == "setup":
@@ -153,6 +153,10 @@ def main() -> None:
             from .reporting import dry_run_main
 
             raise SystemExit(dry_run_main(rest))
+        if cmd == "devices":
+            from .known_devices import cli
+
+            raise SystemExit(cli(rest))
         if cmd == "watch":
             from .watch import main as watch_main
 

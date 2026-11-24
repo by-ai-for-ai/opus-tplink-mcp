@@ -488,3 +488,63 @@ def test_small_tier_memory_tells_the_truth_first(call, monkeypatch) -> None:
 def test_large_tier_has_no_memory_block(call) -> None:
     out = call("wifi_set", action="set", band="5g", enable=False)
     assert "memory" not in out
+
+
+def test_a_bool_for_an_on_off_field_is_sent_as_on_off_and_verifies(call, fake) -> None:  # type: ignore[no-untyped-def]
+    # LM Studio (Bonsai 27B): settings={"isolate": false} went to the router as the text "False"; the router stored
+    # "off", the re-read was reported as a mismatch ("NOT DONE"), and the model told the user "applied and verified".
+    prev = call("wifi_set", action="set", band="guest_access", settings={"isolate": False})
+    assert (prev.get("details") or prev)["diff"][0]["changes"]["isolate"] == {"from": "on", "to": "off"}
+    done = call("wifi_set", **prev["next_call"]["arguments"])
+    assert done["status"] == "applied" and done["verified"] == "yes"
+    assert fake.state["wireless?form=guest"]["isolate"] == "off"
+
+
+def test_isolation_on_the_guest_band_points_to_guest_access(call) -> None:
+    out = call("wifi_set", action="set", band="guest", settings={"isolate": False})
+    assert out["status"] == "NOT_DONE" and '"band": "guest_access"' in out["error"]
+
+
+def test_a_read_through_a_write_tool_is_not_remembered_as_not_done(call, monkeypatch) -> None:
+    # LM Studio (Bonsai 27B): after 'wifi_set action=get' every reply carried
+    # "you_were_asked_to: wifi_set, what_actually_happened: NOT DONE - unknown result".
+    monkeypatch.setenv("TPLINK_MODEL_TIER", "small")
+    out = call("wifi_set", action="get", band="guest_access")
+    assert "memory" not in out
+    assert "memory" not in call("system", action="info")
+
+
+def test_undo_of_an_old_entry_holding_false_text_is_not_drift(call, fake, rt) -> None:  # type: ignore[no-untyped-def]
+    # LM Studio (Bonsai 27B): the journal held isolate="False" (what was sent before f02c1e4), the router "off";
+    # router_undo called that drift and refused.
+    from mcp_tplink_router.safety import Step
+
+    fake.state["wireless?form=guest"]["isolate"] = "off"
+    step = Step("write", "wireless?form=guest", "write", fields={"isolate": "False"}, old={"isolate": "on"})
+    eid = rt.journal.begin("wifi_set", "change guest network access/isolation", [step.to_dict()],
+                           {"wireless?form=guest": {"isolate": "on"}}, risk="normal")
+    rt.journal.finish(eid, "mismatch")
+    prev = call("router_undo", id=eid)
+    assert not prev.get("errors"), prev
+    done = call("router_undo", **(prev.get("next_call") or {}).get("arguments", {"id": eid, "apply": True,
+                                                                                 "confirm_token": prev.get("confirm_token")}))
+    assert done["status"] == "applied" and fake.state["wireless?form=guest"]["isolate"] == "on"
+
+
+def test_a_refused_undo_is_remembered_as_refused(call, apply, fake, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    changed = apply("dhcp_server_set", lease_minutes=600)
+    fake.state["dhcps?form=setting"]["leasetime"] = "700"
+    monkeypatch.setenv("TPLINK_MODEL_TIER", "small")
+    out = call("router_undo", id=changed["journal_id"])
+    assert out["memory"]["what_actually_happened"].startswith("NOT DONE - refused, nothing changed")
+
+
+def test_boolish_keeps_each_fields_own_words() -> None:
+    from mcp_tplink_router.features import boolish
+
+    assert boolish("on", False) == "off" and boolish("off", "False") == "off"
+    assert boolish("true", "true") == "true" and boolish("true", False) == "false"
+    assert boolish("yes", True) == "yes" and boolish("0", True) == "1" and boolish(True, False) is False
+    # every write and undo's drift check run through this: never move a field to another vocabulary
+    assert boolish("enable", "enable") == "enable" and boolish("enable", False) == "disable"
+    assert boolish("disabled", True) == "enabled" and boolish("On", False) == "Off" and boolish("ON", False) == "OFF"

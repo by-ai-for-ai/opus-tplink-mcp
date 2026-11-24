@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.3.0 (2026-11-24)
+
+**"What is that device?"** - the question most people have about their network, answered in one call.
+
+### Added
+- `clients action=list` names each device's **maker** (IEEE's public registry, shipped with the tool, offline),
+  the **router's own type guess** (Printer, IP Camera, Television, ...), and **earlier MACs seen under the same
+  name** - how a phone using private Wi-Fi addresses is recognised. For a private MAC, the maker is read from an
+  earlier real address under that name when there is one. Private and virtual (VM/container) MACs say so instead
+  of guessing. `client=` now finds one device instead of being ignored.
+- `clients action=identify` also asks the devices themselves over **mDNS / DNS-SD** (~3 s, on request only):
+  hostnames, services and announced models (`Canon G3070 series`, `Chromecast with Google TV`). Device-supplied
+  text is cleaned, capped and labelled as data, never instructions.
+- **Private device record** (`label` / `forget` actions): your own name, owner and note for a device, first/last
+  seen, a `new_on_network` flag for a day. Kept only on this computer, encrypted (AES-256-GCM), never uploaded.
+  `TPLINK_KNOWN_DEVICES=off` turns it off; `opus-tplink-mcp devices wipe` deletes it, even if it cannot be read.
+- **Shared device names** (optional, off by default; `opus-tplink-mcp devices sharing`): *receive* downloads a
+  public table of model names devices announced, by maker prefix, seen on at least 3 networks, and matches it
+  locally; *share* also sends, per device that announced a model, only the maker prefix, that model and the
+  router's type guess. Contributions cannot be joined into a household list, even by the server.
+- `clients action=traffic` without a device ranks devices by current use in one call, labels history points
+  (today / yesterday / HH:00), and says plainly that the router's statistics count IPv4 only.
+
+### Fixed
+- Wi-Fi 7 **MLO clients** were missing from every device list (the router's status page has no list for them).
+- true/false sent for an on/off setting reached the router as the text "False" and was reported NOT DONE; reads
+  through write tools carried a false "NOT DONE" memory; undo refused journal entries holding that text. Every
+  on/off value is now written in the field's own vocabulary (on/off, On/Off, yes/no, 1/0, true/false,
+  enable/disable).
+
 ## 1.2.0 (2026-11-24)
 
 **Tested with local models, on routers and range extenders.** Four local models were run against a real

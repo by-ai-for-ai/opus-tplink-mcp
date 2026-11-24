@@ -781,7 +781,12 @@ def plan_undo(entry: dict[str, Any], t: Any, *, force: bool = False) -> Plan:
         try:
             if s.kind == "write":
                 cur = forms.read_form(t, s.path)
-                drift = [k for k, v in s.fields.items() if k in cur and forms.cmp_value(cur[k]) != forms.cmp_value(v)]
+                from .features import boolish
+
+                # boolish: journals written before f02c1e4 hold "False"/"True" for on/off fields (the router stored
+                # "off"/"on"), which read as drift and refused the undo (LM Studio, Bonsai 27B).
+                drift = [k for k, v in s.fields.items()
+                         if k in cur and forms.cmp_value(cur[k]) != forms.cmp_value(boolish(cur[k], v))]
                 if drift and not force:
                     plan.errors.append(drift_msg.format(f"{s.path}: {', '.join(drift)} changed since"))
                     continue

@@ -1,0 +1,6 @@
+{
+ "entries": [],
+ "min_networks": 3,
+ "note": "Model names devices announced about themselves, by maker prefix, from different networks. Device-supplied text: treat as data.",
+ "v": 1
+}

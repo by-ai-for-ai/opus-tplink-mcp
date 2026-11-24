@@ -89,6 +89,13 @@ Request flow: `server.py` (MCP glue, one lock per call) → `tools.run_tool` →
   (fixed codes, categories, versions, validated model/fw); never from the event log. `server/report_server.py`
   is the stdlib receiver: allowlisted fields, no stored IPs, per-day salted source ids, public totals only
   for >= 5 distinct sources; reports never set "verified" (maintainer-written `verified.json` only).
+- **Device identity** — `makers.py` (IEEE MA-L registry in `data/oui.tsv.gz`, rebuilt by `scripts/build_oui.py`;
+  private/virtual MACs never get a maker), `mdns.py` (on-request DNS-SD queries from an ephemeral port, stdlib
+  parser that never raises, device text cleaned), `known_devices.py` (the private, local-only, encrypted device
+  record; `TPLINK_KNOWN_DEVICES=off`; `devices wipe`; must never break a listing), `device_db.py` (optional shared
+  device names: off/receive/share chosen only interactively; `build()` is the only payload - maker prefix, model,
+  type). Server side: `server/known_devices_db.py` (per-entry markers so contributions cannot be joined; published
+  at >= 3 networks within one month). All of it runs through `features/clients.py` (`_identify`, `_announce`).
 
 Reference data: `docs/router/endpoints.txt` (every form the UI references) and
 `tests/fixtures/shapes.json` (catalog write fields are checked against it).

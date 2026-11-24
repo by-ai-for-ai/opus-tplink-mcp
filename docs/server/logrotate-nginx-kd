@@ -1,0 +1,10 @@
+/var/log/nginx-kd/limit.log {
+    daily
+    rotate 0
+    missingok
+    notifempty
+    create 0640 root root
+    postrotate
+        /www/server/nginx/sbin/nginx -s reopen >/dev/null 2>&1 || true
+    endscript
+}

@@ -106,7 +106,40 @@ class Ctx:
                             "connection": d.get("wire_type") or conn})
         if not any(k in st for k in lists):
             out = self._clients_from_device_list()
+        else:
+            out += self._mlo_clients({d["mac"] for d in out})
         return out
+
+    def _mlo_clients(self, have: set[str]) -> list[dict[str, Any]]:
+        """Wi-Fi 7 MLO clients: status?form=all has no list for them (live BE9300 fw 1.2.4 - an MLO speaker and
+        phone were missing from every device list), but the router's full device list marks them online with
+        connType 'wls_mlo', and the DHCP leases carry their addresses."""
+        known = safe_read(self, "avira_parental_control?form=avira_pactrl", "getDevicesList")
+        rows = (known or {}).get("clientList") or [] if isinstance(known, dict) else []
+        mlo = []
+        for r in rows if isinstance(rows, list) else []:
+            if not (isinstance(r, dict) and r.get("online") is True and "mlo" in str(r.get("connType", ""))):
+                continue
+            try:
+                mac = normalize_mac(r.get("mac", ""))
+            except ValueError:
+                continue
+            if mac not in have:
+                mlo.append((mac, r))
+        if not mlo:
+            return []
+        leases = {}
+        try:
+            lease_rows = self.rows("dhcps?form=client")
+        except Exception:  # noqa: BLE001 - the devices are still listed, without an address
+            lease_rows = []
+        for row in lease_rows:
+            try:
+                leases[normalize_mac(row.get("macaddr") or row.get("mac") or "")] = row.get("ipaddr")
+            except ValueError:
+                continue
+        return [{"mac": mac, "ip": leases.get(mac), "name": r.get("name"), "connection": "Wi-Fi 7 MLO"}
+                for mac, r in mlo]
 
     def _clients_from_device_list(self) -> list[dict[str, Any]]:
         """Encrypted-protocol firmware (BE4800, BE3600) has no client lists in status?form=all; the web
@@ -180,26 +213,32 @@ _TRUE_WORDS = ("true", "on", "yes", "enable", "enabled", "1")
 _FALSE_WORDS = ("false", "off", "no", "disable", "disabled", "0")
 
 
+# Each on/off vocabulary a form can use; a caller's true/false is answered in the CURRENT value's own pair and
+# capitalisation (live shapes: on/off, On, yes/no, 1/0; extender forms: enable/disable, true/false).
+_PAIRS = (("on", "off"), ("yes", "no"), ("1", "0"), ("true", "false"), ("enable", "disable"),
+          ("enabled", "disabled"))
+
+
 def boolish(cur: Any, value: Any) -> Any:
     """Convert a caller's bool to the form's own vocabulary (on/off strings or real bools).
 
     Also "true"/"false" sent as TEXT for an on/off field (small models do this; the router stored "off"
-    for "false" and the re-read was then misreported as a mismatch).
+    for "false" and the re-read was then misreported as a mismatch).  Runs on every write (forms.plan_write)
+    and in undo's drift check, so it must never move a field to another vocabulary.
     """
     on_off_field = isinstance(cur, bool) or (isinstance(cur, str) and cur.lower() in _TRUE_WORDS + _FALSE_WORDS)
-    if isinstance(value, str) and on_off_field and value.strip().lower() in ("true", "false", "yes", "no",
-                                                                               "enable", "disable",
-                                                                               "enabled", "disabled"):
+    if isinstance(value, str) and on_off_field and value.strip().lower() in _TRUE_WORDS + _FALSE_WORDS:
         value = value.strip().lower() in _TRUE_WORDS
-    if isinstance(value, bool):
-        if isinstance(cur, bool):
-            return value
-        if isinstance(cur, str) and cur.lower() in ("yes", "no"):
-            return "yes" if value else "no"
-        if isinstance(cur, str) and cur in ("0", "1"):
-            return "1" if value else "0"
-        return ON if value else OFF
-    return value
+    if not isinstance(value, bool):
+        return value
+    if isinstance(cur, bool):
+        return value
+    if isinstance(cur, str):
+        pair = next((p for p in _PAIRS if cur.lower() in p), None)
+        if pair:
+            word = pair[0] if value else pair[1]
+            return word.upper() if cur.isupper() and len(cur) > 1 else word.capitalize() if cur[:1].isupper() else word
+    return ON if value else OFF
 
 
 def settings_change(ctx: Ctx, tool: str, path: str, settings: dict[str, Any], what: str,

@@ -102,3 +102,20 @@ def test_private_feed_needs_a_token_and_lists_unconfirmed_devices(srv: Any) -> N
     feed = srv.monitor_feed()
     assert any(e["code"] == "unconfirmed_device" and e["model"] == m for e in feed["errors"])
     assert all(e["first_seen"].endswith("T00:00:00Z") for e in feed["errors"])     # day-level times only
+
+
+def test_one_machine_over_many_days_is_one_source_and_its_reports_cannot_be_joined(srv, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # review 2026-11-24: per-DAY source ids let one machine count as N sources by reporting on N days
+    rec = {"code": "device_seen", "model": "Archer BE9300", "hardware": "Archer BE9300 v1.0",
+           "firmware": "1.2.4 Build 20260402", "category": "status"}
+    days = [f"2026-11-{d:02d}" for d in range(1, 8)]
+    stored = []
+    for day in days:
+        stored.append({**rec, "day": day, "src": srv.entry_marker("198.51.100.7", rec)})
+    stored.append({**rec, "day": days[0], "src": srv.entry_marker("198.51.100.250", rec)})   # same /24
+    assert len({r["src"] for r in stored}) == 1
+    other = srv.entry_marker("198.51.100.7", {**rec, "code": "not_done"})
+    assert other != stored[0]["src"]                       # a second report from the same home: unlinkable
+    monkeypatch.setattr(srv, "rows", lambda: stored)
+    g = srv.grouped(("model", "hardware", "firmware"), only={"device_seen"}, min_sources=1)
+    assert g[0]["sources"] == 1
